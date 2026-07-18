@@ -66,6 +66,14 @@ export type UnknownError = {
 export const isUnknownError = (value: unknown): value is UnknownError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "UnknownError"
 
+export type TeamRunNotFound = { readonly _tag: "TeamRunNotFound"; readonly runID: string; readonly message: string }
+export const isTeamRunNotFound = (value: unknown): value is TeamRunNotFound =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "TeamRunNotFound"
+
+export type TeamTaskNotFound = { readonly _tag: "TeamTaskNotFound"; readonly taskID: string; readonly message: string }
+export const isTeamTaskNotFound = (value: unknown): value is TeamTaskNotFound =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "TeamTaskNotFound"
+
 export type ProviderNotFoundError = {
   readonly _tag: "ProviderNotFoundError"
   readonly providerID: string
@@ -1751,6 +1759,115 @@ export type SessionsMessageOutput = {
         readonly metadata?: { readonly [x: string]: JsonValue }
         readonly time: { readonly created: number }
       }
+}["data"]
+
+export type ServerTeamListRunsOutput = {
+  readonly data: ReadonlyArray<{
+    readonly id: string
+    readonly sessionID: string
+    readonly teamName: string
+    readonly status: "running" | "completed" | "failed" | "cancelled"
+    readonly timeCreated: number
+    readonly timeUpdated: number
+  }>
+}["data"]
+
+export type ServerTeamCreateRunInput = {
+  readonly sessionID: { readonly sessionID: string; readonly teamName: string }["sessionID"]
+  readonly teamName: { readonly sessionID: string; readonly teamName: string }["teamName"]
+}
+
+export type ServerTeamCreateRunOutput = {
+  readonly data: {
+    readonly id: string
+    readonly sessionID: string
+    readonly teamName: string
+    readonly status: "running" | "completed" | "failed" | "cancelled"
+    readonly timeCreated: number
+    readonly timeUpdated: number
+  }
+}["data"]
+
+export type ServerTeamGetRunInput = { readonly runID: { readonly runID: string }["runID"] }
+
+export type ServerTeamGetRunOutput = {
+  readonly data: {
+    readonly id: string
+    readonly sessionID: string
+    readonly teamName: string
+    readonly status: "running" | "completed" | "failed" | "cancelled"
+    readonly timeCreated: number
+    readonly timeUpdated: number
+  }
+}["data"]
+
+export type ServerTeamListTasksInput = { readonly runID: { readonly runID: string }["runID"] }
+
+export type ServerTeamListTasksOutput = {
+  readonly data: ReadonlyArray<{
+    readonly id: string
+    readonly runID: string
+    readonly sessionID?: string
+    readonly description: string
+    readonly prompt: string
+    readonly role: "worker" | "verifier"
+    readonly status:
+      | "planned"
+      | "ready"
+      | "leased"
+      | "running"
+      | "awaiting-verification"
+      | "rework"
+      | "accepted"
+      | "failed"
+      | "cancelled"
+      | "blocked"
+    readonly dependencies: ReadonlyArray<string>
+    readonly claimedPaths?: ReadonlyArray<string>
+    readonly workspace?: "worktree" | "shared"
+    readonly workspacePath?: string
+    readonly provider?: string
+    readonly model?: string
+    readonly contextLimit?: number
+    readonly timeCreated: number
+    readonly timeUpdated: number
+  }>
+}["data"]
+
+export type ServerTeamGetTaskInput = {
+  readonly runID: { readonly runID: string; readonly taskID: string }["runID"]
+  readonly taskID: { readonly runID: string; readonly taskID: string }["taskID"]
+}
+
+export type ServerTeamGetTaskOutput = {
+  readonly data: {
+    readonly id: string
+    readonly runID: string
+    readonly sessionID?: string
+    readonly description: string
+    readonly prompt: string
+    readonly role: "worker" | "verifier"
+    readonly status:
+      | "planned"
+      | "ready"
+      | "leased"
+      | "running"
+      | "awaiting-verification"
+      | "rework"
+      | "accepted"
+      | "failed"
+      | "cancelled"
+      | "blocked"
+    readonly dependencies: ReadonlyArray<string>
+    readonly claimedPaths?: ReadonlyArray<string>
+    readonly workspace?: "worktree" | "shared"
+    readonly workspacePath?: string
+    readonly provider?: string
+    readonly model?: string
+    readonly contextLimit?: number
+    readonly timeCreated: number
+    readonly timeUpdated: number
+  }
 }["data"]
 
 export type MessagesListInput = {

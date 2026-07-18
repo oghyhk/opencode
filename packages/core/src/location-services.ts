@@ -29,6 +29,7 @@ import { SessionRunnerModel } from "./session/runner/model"
 import { SessionTodo } from "./session/todo"
 import { SkillV2 } from "./skill"
 import { SkillGuidance } from "./skill/guidance"
+import { TeamService } from "./team"
 import { Snapshot } from "./snapshot"
 import { SystemContextBuiltIns } from "./system-context/builtins"
 import { SystemContextRegistry } from "./system-context/registry"
@@ -68,6 +69,7 @@ export const locationServices = LayerNode.group([
   ToolRegistry.toolsNode,
   Image.node,
   SkillGuidance.node,
+  TeamService.node,
   ReferenceGuidance.node,
   SessionTodo.node,
   QuestionV2.node,

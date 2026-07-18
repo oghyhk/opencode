@@ -30,6 +30,15 @@ Guidelines:
 
 Complete the user's search request efficiently and report your findings clearly.`
 
+const PROMPT_ORCHESTRATOR = `You are the Team Orchestrator agent. Your primary role is strictly planning, dependency mapping, and delegation. 
+
+You must decompose tasks and delegate at least 90% of all implementation work to workers. 
+You must NOT execute write/edit/bash implementation tools directly unless it is absolutely necessary, and you must provide a detailed explanation of the exception if you do so.`
+
+const PROMPT_WORKER = `You are a Worker agent. Your role is to implement a bounded task in your assigned workspace and return structured evidence (files changed, commands run, artifacts, and completion summary).`
+
+const PROMPT_VERIFIER = `You are a Verifier agent. Your role is to independently inspect worker results, run validation, and accept, reject, or request rework with evidence.`
+
 const PROMPT_COMPACTION = `You are an anchored context summarization assistant for coding sessions.
 
 Summarize only the conversation history you are given. The newest turns may be kept verbatim outside your summary, so focus on the older context that still matters for continuing the work.
@@ -177,6 +186,49 @@ export const Plugin = define({
               { action: "read", resource: "*", effect: "allow" },
             ],
             readonlyExternalDirectory,
+          ),
+        )
+      })
+
+      draft.update(AgentV2.ID.make("orchestrator"), (item) => {
+        item.description = "Team Orchestrator. Dispatches and schedules tasks to workers."
+        item.system = PROMPT_ORCHESTRATOR
+        item.mode = "primary"
+        item.permissions.push(
+          ...PermissionV2.merge(
+            defaults,
+            [
+              { action: "edit", resource: "*", effect: "deny" },
+              { action: "write", resource: "*", effect: "deny" },
+              { action: "apply_patch", resource: "*", effect: "deny" },
+              { action: "bash", resource: "*", effect: "deny" },
+              { action: "task", resource: "*", effect: "allow" },
+              { action: "question", resource: "*", effect: "allow" },
+            ],
+          ),
+        )
+      })
+
+      draft.update(AgentV2.ID.make("worker"), (item) => {
+        item.description = "Team Worker. Implements a bounded task in an isolated workspace."
+        item.system = PROMPT_WORKER
+        item.mode = "subagent"
+        item.permissions.push(...defaults)
+      })
+
+      draft.update(AgentV2.ID.make("verifier"), (item) => {
+        item.description = "Team Verifier. Reviews worker changes and validates them."
+        item.system = PROMPT_VERIFIER
+        item.mode = "subagent"
+        item.permissions.push(
+          ...PermissionV2.merge(
+            defaults,
+            [
+              { action: "edit", resource: "*", effect: "deny" },
+              { action: "write", resource: "*", effect: "deny" },
+              { action: "apply_patch", resource: "*", effect: "deny" },
+              { action: "bash", resource: "*", effect: "deny" },
+            ],
           ),
         )
       })

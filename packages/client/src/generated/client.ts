@@ -37,6 +37,15 @@ import type {
   SessionsInterruptOutput,
   SessionsMessageInput,
   SessionsMessageOutput,
+  ServerTeamListRunsOutput,
+  ServerTeamCreateRunInput,
+  ServerTeamCreateRunOutput,
+  ServerTeamGetRunInput,
+  ServerTeamGetRunOutput,
+  ServerTeamListTasksInput,
+  ServerTeamListTasksOutput,
+  ServerTeamGetTaskInput,
+  ServerTeamGetTaskOutput,
   MessagesListInput,
   MessagesListOutput,
   ModelsListInput,
@@ -488,6 +497,58 @@ export function make(options: ClientOptions) {
             path: `/api/session/${encodeURIComponent(input.sessionID)}/message/${encodeURIComponent(input.messageID)}`,
             successStatus: 200,
             declaredStatuses: [404, 400, 401],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+    },
+    "server.team": {
+      listRuns: (requestOptions?: RequestOptions) =>
+        request<{ readonly data: ServerTeamListRunsOutput }>(
+          { method: "GET", path: `/api/team/run`, successStatus: 200, declaredStatuses: [401, 400], empty: false },
+          requestOptions,
+        ).then((value) => value.data),
+      createRun: (input: ServerTeamCreateRunInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: ServerTeamCreateRunOutput }>(
+          {
+            method: "POST",
+            path: `/api/team/run`,
+            body: { sessionID: input["sessionID"], teamName: input["teamName"] },
+            successStatus: 200,
+            declaredStatuses: [404, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      getRun: (input: ServerTeamGetRunInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: ServerTeamGetRunOutput }>(
+          {
+            method: "GET",
+            path: `/api/team/run/${encodeURIComponent(input.runID)}`,
+            successStatus: 200,
+            declaredStatuses: [500, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      listTasks: (input: ServerTeamListTasksInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: ServerTeamListTasksOutput }>(
+          {
+            method: "GET",
+            path: `/api/team/run/${encodeURIComponent(input.runID)}/task`,
+            successStatus: 200,
+            declaredStatuses: [500, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      getTask: (input: ServerTeamGetTaskInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: ServerTeamGetTaskOutput }>(
+          {
+            method: "GET",
+            path: `/api/team/run/${encodeURIComponent(input.runID)}/task/${encodeURIComponent(input.taskID)}`,
+            successStatus: 200,
+            declaredStatuses: [500, 401, 400],
             empty: false,
           },
           requestOptions,

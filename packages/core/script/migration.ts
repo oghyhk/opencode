@@ -100,14 +100,14 @@ async function drizzle(temporary: string, output: string, name?: string) {
 export default { ...config, out: ${JSON.stringify(output)} }
 `,
   )
-  await $`bun drizzle-kit generate --config ${config} ${name ? ["--name", name] : []}`.cwd(
+  await $`bun run db generate --config ${config} ${name ? ["--name", name] : []}`.cwd(
     path.join(root, "packages/core"),
   )
 }
 
 async function generatedMigrations(directory: string) {
   return (await Array.fromAsync(new Bun.Glob("*/migration.sql").scan({ cwd: directory })))
-    .map((file) => file.split("/")[0])
+    .map((file) => file.replaceAll("\\", "/").split("/")[0])
     .filter((name): name is string => name !== undefined)
     .sort()
 }

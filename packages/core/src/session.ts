@@ -78,6 +78,7 @@ export type ListInput = typeof ListInput.Type
 
 type CreateInput = {
   id?: SessionSchema.ID
+  parentID?: SessionSchema.ID
   agent?: AgentV2.ID
   model?: ModelV2.Ref
   location: Location.Ref

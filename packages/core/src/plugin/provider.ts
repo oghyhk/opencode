@@ -12,6 +12,7 @@ import { GatewayPlugin } from "./provider/gateway"
 import { GithubCopilotPlugin } from "./provider/github-copilot"
 import { GitLabPlugin } from "./provider/gitlab"
 import { GooglePlugin } from "./provider/google"
+import { GoogleAntigravityPlugin } from "./provider/google-antigravity"
 import { GoogleVertexAnthropicPlugin, GoogleVertexPlugin } from "./provider/google-vertex"
 import { GroqPlugin } from "./provider/groq"
 import { KiloPlugin } from "./provider/kilo"
@@ -48,6 +49,7 @@ export const ProviderPlugins: PluginInternal.Plugin<PluginInternal.Requirements 
   GithubCopilotPlugin,
   GitLabPlugin,
   GooglePlugin,
+  GoogleAntigravityPlugin,
   GoogleVertexAnthropicPlugin,
   GoogleVertexPlugin,
   GroqPlugin,
