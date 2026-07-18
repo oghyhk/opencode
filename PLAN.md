@@ -24,6 +24,8 @@ This is the living execution checklist for this project. Any agent continuing th
 - Do not treat free-form agent text as the authoritative workflow state. Use typed task, artifact, review, and run records.
 - The orchestrator may inspect, plan, dispatch, unblock, request clarification, and synthesize. It must not receive ordinary implementation/edit tools by default.
 - Do not silently port authentication behavior from the external plugin. First confirm its license, upstream API compatibility, credential handling, and Google terms; keep tokens in the existing secure credential path and never log them.
+- Native Antigravity support must supply its complete model catalog and valid thinking variants without relying on a user-added plugin declaration or a hand-maintained `provider.google.models` entry. Migration away from those local configuration workarounds must be explicit and non-destructive.
+- Do not change the user's permissive permission policy or compaction retention settings as part of this integration; they are outside the reported failure unless focused evidence proves otherwise.
 
 ## Target Product Model
 
@@ -49,6 +51,8 @@ Users must be able to configure a default provider/model and a requested context
 6. Existing provider/model defaults only when no value is configured above.
 
 `context_limit` is a token budget for the selected model's usable prompt context. At validation and again when resolving an attempt, OpenCode must require `64_000 <= context_limit <= model.context_window`. It must reject a model with an unknown or smaller-than-64k verified context window for a role requiring this policy; it must never silently inflate, guess, or exceed a model's catalogued maximum. The effective provider/model/context limit must be visible before a run starts, persisted with every task attempt, and displayed in the TUI.
+
+For native Antigravity models, the model catalog is the authoritative source for this validation. The current local configuration uses a 910,000-token limit for `antigravity-gemini-3.5-flash`, while the external plugin's canonical catalog currently advertises 1,048,576 tokens. Phase 0 must reconcile that discrepancy from source-backed provider evidence before the native catalog ships; neither value may be silently inherited merely because it appears in a local configuration file.
 
 ### Example configuration direction
 
@@ -120,6 +124,9 @@ Teams may later support named worker pools (for example `frontend`, `backend`, a
 
 - [ ] Map the existing `task` tool, child-session model, `BackgroundJob`, session runner, permissions, worktree service, protocol/API schemas, TUI event stream, and database migration conventions.
 - [ ] Inspect the local `opencode-antigravity-auth` source as the behavioral reference; document its auth endpoints, callback flow, model catalog, request wrapper, token storage, retries, and error behavior.
+- [ ] Compare the plugin's canonical Antigravity model catalog with the current local `C:\Users\oghyh\Coding\opencode.json`; document the complete required model metadata, the 910,000-versus-1,048,576 context-window discrepancy for Gemini 3.5 Flash, and the migration path that removes plugin/config duplication without modifying user configuration implicitly.
+- [ ] Reproduce the reported Gemini Flash tool-loop failure with and without registered thinking variants, then capture the exact provider events for a valid final bare-text `stop`, a tool-call turn, and a premature/no-thinking `stop`.
+- [ ] Verify that native Antigravity model correctness does not depend on the `skill` tool being enabled. Document separately that the current `build`/`plan` `tools.skill: false` setting prevents agents from loading configuration-customization guidance, and obtain approval before changing that user preference.
 - [ ] Confirm which source areas are V1 compatibility layers versus the V2 session core so new orchestration work does not extend a retiring path unnecessarily.
 - [ ] Audit the model catalog and provider request paths to define how an effective context limit is enforced, including models whose advertised window is unknown, less than 64k, or has a provider-specific usable-input limit.
 - [ ] Produce an ADR covering the durable task graph, task ownership, cancellation, retry semantics, role/tool boundaries, artifact schema, worker workspace isolation, and model/context-limit resolution.
@@ -184,16 +191,20 @@ Teams may later support named worker pools (for example `frontend`, `backend`, a
 
 - [ ] **Exit criterion:** an operator can understand why a run is waiting, which task changed which files, which effective model/context policy applies, and whether the final result is verified without reading every transcript.
 
-### [ ] Phase 7 — Native Antigravity authentication and provider support
+### [ ] Phase 7 — Native Antigravity authentication, model catalog, and provider support
 
 - [ ] Confirm how the current local `opencode-antigravity-auth` plugin implements OAuth PKCE, local callback handling, token refresh, model discovery/catalog, request envelopes, device identity, thinking recovery, and errors.
 - [ ] Add a native provider/integration registration in the appropriate current provider architecture. The proposed locations in the supplied report (`packages/core/src/integration.ts`, a native provider plugin, and Google request handling) are starting hypotheses; Phase 0 must confirm the exact extension points before code is written.
 - [ ] Add a `google-antigravity` provider identity and TUI authentication entry. Start the callback listener only for an explicit auth attempt, prefer the requested port 51121 when available, handle port conflicts safely, validate OAuth state/PKCE, time out cleanly, and surface actionable TUI errors.
-- [ ] Register supported Claude and Gemini Antigravity models with correct capabilities, verified context windows usable by the model/context policy, costs/unknown-cost semantics, and tool support. Do not claim model properties without source-backed validation.
+- [ ] Register supported Claude and Gemini Antigravity models natively with every required field: stable ID, display name, verified context/output limits, input/output modalities, capabilities/tool support, costs or explicit unknown-cost semantics, and valid variants. Do not claim model properties without source-backed validation.
+- [ ] Register Gemini Flash thinking variants (`minimal`, `low`, `medium`, and `high`) with their `thinkingLevel` payload mapping. Give Flash models a native default of `medium` when no variant is selected, preserve an explicit user/team/role variant, and reject an unavailable variant instead of silently falling back to no thinking.
+- [ ] Preserve model-specific variant semantics for non-Flash Antigravity models, including the plugin's Claude thinking-budget variants where supported; do not force Gemini `thinkingLevel` fields onto Claude requests.
+- [ ] Implement and test provider-turn handling for thought signatures and `finish_reason: "stop"`. A valid final bare-text stop must still finish normally; only a source-backed, explicitly detected incomplete tool workflow may continue or retry. Do not use a blanket "ignore stop" loop.
 - [ ] Route only Antigravity-model requests through the required request envelope/wrapping and response/thinking recovery. Keep ordinary Google provider traffic unchanged.
 - [ ] Store credentials through the existing secure auth/credential mechanism, redact sensitive fields from logs/events, and add migration/cleanup behavior for plugin-originated credentials if applicable.
+- [ ] Add a compatibility/migration notice that detects the external plugin/custom-model configuration pattern and explains how to remove it after native support is enabled. The native fork must work with no `@zeklop/opencode-antigravity-auth` declaration and no hand-authored Antigravity model entry; it must not rewrite the user's global config automatically.
 
-- [ ] **Exit criterion:** a fresh TUI user can authenticate, select a native Antigravity model, configure a valid context limit, run a tool-using task, restart OpenCode, and refresh/revoke credentials without an external plugin declaration or secret leakage.
+- [ ] **Exit criterion:** a fresh TUI user can authenticate, select a complete native Antigravity model catalog entry and a valid thinking variant/context limit, run a multi-turn tool-using task, restart OpenCode, and refresh/revoke credentials without an external plugin declaration, custom model declaration, premature tool-loop exit, or secret leakage.
 
 ### [ ] Phase 8 — Compatibility, performance, and release
 
@@ -213,7 +224,7 @@ Teams may later support named worker pools (for example `frontend`, `backend`, a
 | Isolation | Concurrent write-scope conflict tests, isolated-worktree lifecycle, cleanup/recovery, and explicit shared-workspace approval. |
 | Worker/verifier loop | Structured handoff validation, verifier acceptance/rework/rejection, artifact persistence, and final-response verification labels. |
 | TUI/API | Live graph state, nested task navigation, controls, event replay, reconnect, and large-run performance. |
-| Antigravity | OAuth PKCE/state validation, callback lifecycle/port conflict, secure token persistence/refresh/revoke, model catalog, request wrapping, thinking/tool response handling, and non-regression for ordinary Google models. |
+| Antigravity | OAuth PKCE/state validation, callback lifecycle/port conflict, secure token persistence/refresh/revoke, complete native model metadata, Flash/Claude variant validation and defaults, thought-signature round trips, valid versus premature bare-text `stop` handling, request wrapping, and non-regression for ordinary Google models. |
 
 ## Decisions Requiring Explicit Approval Before Implementation
 
