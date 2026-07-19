@@ -4,7 +4,7 @@ import { Context, Effect, Layer, Schema, Option } from "effect"
 import { Database } from "../database/database"
 import { TeamRunTable, TeamTaskTable, TaskAttemptTable, TaskArtifactTable, VerificationTable } from "./sql"
 import { Team } from "@opencode-ai/schema/team"
-import { eq, and } from "drizzle-orm"
+import { eq, and, or, lt } from "drizzle-orm"
 import { makeLocationNode } from "../effect/app-node"
 import { EventV2 } from "../event"
 import { DateTime } from "effect"
@@ -39,7 +39,9 @@ export interface Interface {
     readonly contextLimit?: number
   }) => Effect.Effect<Team.TaskInfo>
 
-  readonly leaseTask: (taskID: Team.TaskID) => Effect.Effect<Team.TaskInfo | undefined>
+  readonly leaseTask: (taskID: Team.TaskID, ownerID: string) => Effect.Effect<Team.TaskInfo | undefined>
+  readonly heartbeatTask: (taskID: Team.TaskID, ownerID: string) => Effect.Effect<void>
+  readonly releaseStaleLeases: () => Effect.Effect<void>
 
   readonly completeTask: (input: {
     readonly taskID: Team.TaskID
@@ -283,8 +285,9 @@ const layer = Layer.effect(
       }
     })
 
-    const leaseTask = Effect.fn("TeamService.leaseTask")(function* (taskID: Team.TaskID) {
+    const leaseTask = Effect.fn("TeamService.leaseTask")(function* (taskID: Team.TaskID, ownerID: string) {
       const now = Date.now()
+      const expiresAt = now + 60_000 // 60 seconds lease
       // Run inside a database transaction to ensure atomicity of the lease
       const result = yield* db
         .transaction((tx) =>
@@ -296,18 +299,23 @@ const layer = Layer.effect(
               .get()
               .pipe(Effect.orDie)
 
-            if (!task || task.status !== "planned") {
+            if (!task || (task.status !== "planned" && task.status !== "ready")) {
               return undefined
             }
 
             yield* tx
               .update(TeamTaskTable)
-              .set({ status: "leased", time_updated: now })
+              .set({ 
+                status: "leased", 
+                lease_owner: ownerID,
+                lease_expires_at: expiresAt,
+                time_updated: now 
+              })
               .where(eq(TeamTaskTable.id, taskID))
               .run()
               .pipe(Effect.orDie)
 
-            return task
+            return { ...task, lease_owner: ownerID, lease_expires_at: expiresAt }
           }),
         )
         .pipe(Effect.orDie)
@@ -329,9 +337,45 @@ const layer = Layer.effect(
         provider: result.provider || undefined,
         model: result.model || undefined,
         contextLimit: result.context_limit || undefined,
+        leaseOwner: result.lease_owner || undefined,
+        leaseExpiresAt: result.lease_expires_at ? DateTime.makeUnsafe(result.lease_expires_at) : undefined,
         timeCreated: DateTime.makeUnsafe(result.time_created),
         timeUpdated: DateTime.makeUnsafe(now),
       }
+    })
+
+    const heartbeatTask = Effect.fn("TeamService.heartbeatTask")(function* (taskID: Team.TaskID, ownerID: string) {
+      const now = Date.now()
+      const expiresAt = now + 60_000
+      
+      yield* db
+        .update(TeamTaskTable)
+        .set({ lease_expires_at: expiresAt })
+        .where(and(eq(TeamTaskTable.id, taskID), eq(TeamTaskTable.lease_owner, ownerID)))
+        .run()
+        .pipe(Effect.orDie)
+    })
+
+    const releaseStaleLeases = Effect.fn("TeamService.releaseStaleLeases")(function* () {
+      const now = Date.now()
+      
+      yield* db
+        .update(TeamTaskTable)
+        .set({ 
+          status: "ready", 
+          lease_owner: null,
+          lease_expires_at: null,
+          session_id: null,
+          time_updated: now 
+        })
+        .where(
+          and(
+            or(eq(TeamTaskTable.status, "leased"), eq(TeamTaskTable.status, "running")),
+            lt(TeamTaskTable.lease_expires_at, now)
+          )
+        )
+        .run()
+        .pipe(Effect.orDie)
     })
 
     const completeTask = Effect.fn("TeamService.completeTask")(function* (input: {
@@ -525,6 +569,8 @@ const layer = Layer.effect(
       getTaskBySession,
       createTask,
       leaseTask,
+      heartbeatTask,
+      releaseStaleLeases,
       completeTask,
       failTask,
       cancelRun,

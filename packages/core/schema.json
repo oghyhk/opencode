@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "df64ba8a-da3d-41c3-9539-7f16a5166729",
+  "id": "e35021b6-d9d7-4589-8e5a-4c0448b6eba4",
   "prevIds": [
-    "4cf898f6-cd91-4262-a37a-bc85375054db"
+    "df64ba8a-da3d-41c3-9539-7f16a5166729"
   ],
   "ddl": [
     {
@@ -1849,6 +1849,26 @@
       "default": null,
       "generated": null,
       "name": "context_limit",
+      "entityType": "columns",
+      "table": "team_task"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "lease_owner",
+      "entityType": "columns",
+      "table": "team_task"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "lease_expires_at",
       "entityType": "columns",
       "table": "team_task"
     },

@@ -136,9 +136,9 @@ Teams may later support named worker pools (for example `frontend`, `backend`, a
 ### [ ] Phase 1 — Durable team and task-graph foundation
 
 - [x] Add schema, database migrations, protocol definitions, and server endpoints for `TeamRun`, `TeamTask`, `TaskAttempt`, `TaskArtifact`, and `Verification` records.
-- [ ] Define task states such as `planned`, `ready`, `leased`, `running`, `awaiting-verification`, `rework`, `accepted`, `failed`, `cancelled`, and `blocked`.
-- [ ] Store role, assigned session, dependencies, lineage, requested scope, workspace/worktree, effective provider/model/context-limit snapshot, retry policy, timestamps, and structured result references.
-- [ ] Implement atomic state transitions and leases so two local processes or UI actions cannot run the same task twice.
+- [x] Define task states such as `planned`, `ready`, `leased`, `running`, `awaiting-verification`, `rework`, `accepted`, `failed`, `cancelled`, and `blocked`.
+- [x] Store role, assigned session, dependencies, lineage, requested scope, workspace/worktree, effective provider/model/context-limit snapshot, retry policy, timestamps, and structured result references.
+- [x] Implement atomic state transitions and leases so two local processes or UI actions cannot run the same task twice.
 - [ ] Implement durable cancellation propagation and restart recovery policy; avoid representing durable work as a process-local `BackgroundJob`.
 
 - [ ] **Exit criterion:** focused unit/integration tests cover task-graph transitions, dependency release, idempotency, leases, retries, cancellation, and restart recovery.
@@ -154,13 +154,13 @@ Teams may later support named worker pools (for example `frontend`, `backend`, a
 
 - [ ] **Exit criterion:** configuration validation reports actionable errors; the effective model/provider/context-limit resolution is visible in the TUI and persisted in attempts; role restrictions are tested independently of prompting.
 
-### [ ] Phase 3 — Scheduler, worker runtime, and structured handoffs
+### [x] Phase 3 — Scheduler, worker runtime, and structured handoffs
 
-- [ ] Build a team scheduler that dispatches only dependency-ready tasks and enforces per-team/global concurrency limits.
-- [ ] Create a worker-launch path that initializes a child session with an explicit task contract, scoped context limited to the effective model/context policy, assigned workspace/worktree, acceptance criteria, and requested return fields.
-- [ ] Replace text-only completion handoffs with structured artifacts/reports while retaining readable transcript output for compatibility.
-- [ ] Add an explicit orchestrator inbox/event stream: task completion becomes a state event, not an automatic synthetic user prompt that starts an uncontrolled parent turn.
-- [ ] Implement scoped task updates, blockers, reassignments, continuation, and explicit task ownership validation. Reject missing, foreign, or role-mismatched task/session IDs rather than silently creating or resuming unrelated sessions.
+- [x] Build a team scheduler that dispatches only dependency-ready tasks and enforces per-team/global concurrency limits.
+- [x] Create a worker-launch path that initializes a child session with an explicit task contract, scoped context limited to the effective model/context policy, assigned workspace/worktree, acceptance criteria, and requested return fields.
+- [x] Replace text-only completion handoffs with structured artifacts/reports while retaining readable transcript output for compatibility.
+- [x] Add an explicit orchestrator inbox/event stream: task completion becomes a state event, not an automatic synthetic user prompt that starts an uncontrolled parent turn.
+- [x] Implement scoped task updates, blockers, reassignments, continuation, and explicit task ownership validation. Reject missing, foreign, or role-mismatched task/session IDs rather than silently creating or resuming unrelated sessions.
 
 - [ ] **Exit criterion:** a multi-worker run can execute independent tasks concurrently, resume after interruption, and provide the orchestrator with ordered structured results.
 

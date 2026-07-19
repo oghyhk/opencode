@@ -43,5 +43,6 @@ export const migrations = (
     import("./migration/20260718160259_add_team_orchestration"),
     import("./migration/20260718161854_add_team_claimed_paths"),
     import("./migration/20260718162013_add_team_task_workspace"),
+    import("./migration/20260719010702_add_team_task_lease"),
   ])
 ).map((module) => module.default) satisfies DatabaseMigration.Migration[]

@@ -35,6 +35,8 @@ export const TeamTaskTable = sqliteTable(
     provider: text("provider"),
     model: text("model"),
     context_limit: integer("context_limit"),
+    lease_owner: text("lease_owner"),
+    lease_expires_at: integer("lease_expires_at"),
     ...Timestamps,
   },
   (table) => [

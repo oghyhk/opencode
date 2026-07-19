@@ -53,6 +53,8 @@ export const TaskInfo = Schema.Struct({
   provider: Schema.String.pipe(optional),
   model: Schema.String.pipe(optional),
   contextLimit: Schema.Finite.pipe(optional),
+  leaseOwner: Schema.String.pipe(optional),
+  leaseExpiresAt: DateTimeUtcFromMillis.pipe(optional),
   timeCreated: DateTimeUtcFromMillis,
   timeUpdated: DateTimeUtcFromMillis,
 }).annotate({ identifier: "TeamTask.Info" })

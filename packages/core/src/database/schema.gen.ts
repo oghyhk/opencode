@@ -288,6 +288,8 @@ export default {
           \`provider\` text,
           \`model\` text,
           \`context_limit\` integer,
+          \`lease_owner\` text,
+          \`lease_expires_at\` integer,
           \`time_created\` integer NOT NULL,
           \`time_updated\` integer NOT NULL,
           CONSTRAINT \`fk_team_task_run_id_team_run_id_fk\` FOREIGN KEY (\`run_id\`) REFERENCES \`team_run\`(\`id\`) ON DELETE CASCADE,

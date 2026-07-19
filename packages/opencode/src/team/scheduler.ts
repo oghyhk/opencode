@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Queue, Schedule, Scope } from "effect"
+import { Context, Effect, Fiber, Layer, Queue, Schedule, Scope } from "effect"
 import { Database } from "@opencode-ai/core/database/database"
 import { TeamService } from "@opencode-ai/core/team"
 import { TeamRunTable, TeamTaskTable } from "@opencode-ai/core/team/sql"
@@ -67,6 +67,8 @@ const layer = Layer.effect(
     }
 
     const runSchedulerIteration = Effect.fn("TeamScheduler.iteration")(function* () {
+      yield* team.releaseStaleLeases()
+      
       const runs = yield* db.select().from(TeamRunTable).where(eq(TeamRunTable.status, "running")).all().pipe(Effect.orDie)
 
       for (const runRow of runs) {
@@ -117,18 +119,19 @@ const layer = Layer.effect(
 
         for (const task of toStart) {
           // Atomically lease the task
-          const leased = yield* team.leaseTask(task.id)
+          const ownerID = crypto.randomUUID()
+          const leased = yield* team.leaseTask(task.id, ownerID)
           if (!leased) continue
 
           // Spawn the task runner as a background fiber
-          yield* startTaskRunner(leased).pipe(
+          yield* startTaskRunner(leased, ownerID).pipe(
             Effect.forkScoped,
           )
         }
       }
     })
 
-    const startTaskRunner = (task: Team.TaskInfo) =>
+    const startTaskRunner = (task: Team.TaskInfo, ownerID: string) =>
       Effect.gen(function* () {
         const sessionService = yield* SessionV2.Service
         const now = Date.now()
@@ -144,6 +147,12 @@ const layer = Layer.effect(
 
         const run = yield* team.getRun(task.runID)
         const parentID = run?.sessionID
+
+        // Start heartbeat fiber
+        const heartbeatFiber = yield* Effect.repeat(
+          team.heartbeatTask(task.id, ownerID),
+          Schedule.spaced("10 seconds")
+        ).pipe(Effect.forkScoped)
 
         let workspaceDir = process.cwd()
         let hasWorktree = false
@@ -297,11 +306,13 @@ const layer = Layer.effect(
               }
             }
           } catch (error) {
-          logError(task.id, error)
-          yield* team.failTask(task.id, String(error))
-        } finally {
-          // Cleanup worktree if created
-          if (hasWorktree && workspaceDir) {
+            logError(task.id, error)
+            yield* team.failTask(task.id, String(error))
+          } finally {
+            // Stop heartbeat
+            yield* Fiber.interrupt(heartbeatFiber)
+            // Cleanup worktree if created
+            if (hasWorktree && workspaceDir) {
             yield* worktreeService.remove({ directory: workspaceDir }).pipe(Effect.ignore)
           }
           // Trigger next iteration immediately
