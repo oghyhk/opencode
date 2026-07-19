@@ -5,6 +5,10 @@ import { TeamRunTable, TeamTaskTable } from "@opencode-ai/core/team/sql"
 import { Team } from "@opencode-ai/schema/team"
 import { eq, and } from "drizzle-orm"
 import { SessionV2 } from "@opencode-ai/core/session"
+import { SessionEvent } from "@opencode-ai/core/session/event"
+import { SessionMessage } from "@opencode-ai/core/session/message"
+import { DateTime } from "effect"
+import { SessionExecution } from "@opencode-ai/core/session/execution"
 import { makeLocationNode } from "@opencode-ai/core/effect/app-node"
 import { EventV2 } from "@opencode-ai/core/event"
 import { AgentV2 } from "@opencode-ai/core/agent"
@@ -14,7 +18,7 @@ import { AppProcess } from "@opencode-ai/core/process"
 import { ChildProcess } from "effect/unstable/process"
 
 export interface Interface {
-  readonly start: () => Effect.Effect<void, never, Scope.Scope | SessionV2.Service>
+  readonly start: () => Effect.Effect<void, never, Scope.Scope | SessionV2.Service | SessionExecution.Service | EventV2.Service>
   readonly trigger: () => Effect.Effect<void>
 }
 
@@ -270,8 +274,29 @@ const layer = Layer.effect(
             }
           }
 
-          yield* Effect.logInfo(`Completed team task successfully: ${task.description}`, { taskID: task.id })
-        } catch (error) {
+            yield* Effect.logInfo(`Completed team task successfully: ${task.description}`, { taskID: task.id })
+            
+            // Notify the orchestrator session
+            const run = yield* team.getRun(task.runID)
+            if (run) {
+              const allTasks = yield* team.listTasks(run.id)
+              const nonTerminal = allTasks.filter(t => ["planned", "ready", "leased", "running", "awaiting-verification", "rework"].includes(t.status))
+              
+              const sessionExecution = yield* SessionExecution.Service
+              if (nonTerminal.length === 0) {
+                const events = yield* EventV2.Service
+                yield* events.publish(SessionEvent.Synthetic, {
+                  sessionID: run.sessionID,
+                  messageID: SessionMessage.ID.create(),
+                  text: "All tasks in the team run are now terminal. Please synthesize the final result.",
+                  timestamp: yield* DateTime.now,
+                })
+                yield* sessionExecution.resume(run.sessionID).pipe(Effect.ignore)
+              } else {
+                yield* sessionExecution.wake(run.sessionID)
+              }
+            }
+          } catch (error) {
           logError(task.id, error)
           yield* team.failTask(task.id, String(error))
         } finally {
@@ -314,7 +339,7 @@ const layer = Layer.effect(
 export const node = makeLocationNode({
   service: Service,
   layer,
-  deps: [Database.node, TeamService.node, SessionV2.node, EventV2.node, Worktree.node, AppProcess.node],
+  deps: [Database.node, TeamService.node, SessionV2.node, SessionExecution.node, EventV2.node, Worktree.node, AppProcess.node],
 })
 
 export * as TeamScheduler from "./scheduler"

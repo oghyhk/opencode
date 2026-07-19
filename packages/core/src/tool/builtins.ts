@@ -12,6 +12,8 @@ import { ReadTool } from "./read"
 import { SkillTool } from "./skill"
 import { TodoWriteTool } from "./todowrite"
 import { WebFetchTool } from "./webfetch"
+import * as TeamTaskTool from "./team-task"
+import * as TeamStatusTool from "./team-status"
 import { WebSearchTool } from "./websearch"
 import { WriteTool } from "./write"
 
@@ -44,5 +46,7 @@ export const node = makeLocationNode({
     WebFetchTool.node,
     WebSearchTool.node,
     WriteTool.node,
+    TeamTaskTool.node,
+    TeamStatusTool.node,
   ],
 })

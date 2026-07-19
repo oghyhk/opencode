@@ -15,6 +15,7 @@ import type { JSONSchema7 } from "@ai-sdk/provider"
 import { SessionCompaction } from "./compaction"
 import { SystemPrompt } from "./system"
 import { Instruction } from "./instruction"
+import { CompletionPolicy } from "@opencode-ai/core/session/completion-policy"
 import { Plugin } from "../plugin"
 import { MAX_STEPS_PROMPT } from "@opencode-ai/core/session/runner/max-steps"
 import { ToolRegistry } from "@/tool/registry"
@@ -140,6 +141,7 @@ const layer = Layer.effect(
     const events = yield* EventV2Bridge.Service
     const flags = yield* RuntimeFlags.Service
     const database = yield* Database.Service
+    const completionPolicy = yield* CompletionPolicy.Service
     const { db } = database
     const ops = Effect.fn("SessionPrompt.ops")(function* () {
       return {
@@ -1083,6 +1085,7 @@ const layer = Layer.effect(
         const ctx = yield* InstanceState.context
         let structured: unknown
         let step = 0
+        let autoContinuations = 0
         const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
 
         while (true) {
@@ -1316,7 +1319,45 @@ const layer = Layer.effect(
               }
             }
 
-            if (result === "stop") return "break" as const
+            if (result === "stop") {
+              const guard = yield* completionPolicy.evaluate(sessionID)
+              if (guard.needsContinuation) {
+                if (autoContinuations >= 5) {
+                  const errorMsg = new SessionV1.APIError({
+                    message: "Automatic continuation limit reached. The run is blocked. Please resolve any outstanding tasks or blockers manually.",
+                    isRetryable: false,
+                  })
+                  handle.message.error = errorMsg.toObject()
+                  yield* sessions.updateMessage(handle.message)
+                  yield* events.publish(Session.Event.Error, { sessionID, error: handle.message.error })
+                  return "break" as const
+                }
+                autoContinuations++
+                
+                // Add the synthetic user message to keep the loop going
+                const syntheticUser: SessionV1.User = {
+                  id: MessageID.ascending(),
+                  role: "user",
+                  sessionID,
+                  agent: lastUser.agent,
+                  model: lastUser.model,
+                  time: { created: Date.now() },
+                }
+                yield* sessions.updateMessage(syntheticUser)
+
+                const textPart: SessionV1.TextPart = {
+                  id: PartID.ascending(),
+                  messageID: syntheticUser.id,
+                  sessionID,
+                  type: "text",
+                  text: guard.instruction ?? "Please proceed with pending work.",
+                }
+                yield* sessions.updatePart(textPart)
+
+                return "continue" as const
+              }
+              return "break" as const
+            }
             if (result === "compact") {
               yield* compaction.create({
                 sessionID,
@@ -1625,6 +1666,7 @@ export const node = LayerNode.make({
     EventV2Bridge.node,
     RuntimeFlags.node,
     Database.node,
+    CompletionPolicy.node,
   ],
 })
 

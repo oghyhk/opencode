@@ -216,6 +216,18 @@ Teams may later support named worker pools (for example `frontend`, `backend`, a
 
 - [ ] **Exit criterion:** production release behind flag, all tests green, documentation in place.
 
+### [x] Phase 9 — Objective Completion Guard
+
+- [x] Define completion-policy abstraction shared between V1 and V2 sessions.
+- [x] Check durable objectives (team tasks or session todos) before accepting a provider `stop` without tool calls as final.
+- [x] If required work remains, persist checkpoint response and schedule an automatic continuation turn without returning to idle.
+- [x] Maintain a configurable continuation budget, reset on user input, to prevent runaway loops. Surface blocked/error state if budget exceeded.
+- [x] Ensure legitimate completions, user blockers, and tool-call continuations still work normally.
+- [x] Add deterministic test coverage for auto-continuation, legitimate completion, tool calls, user blockers, no-progress protection, cancellation, and team workflow.
+- [x] Document the completion guard in the architecture specification.
+
+- [x] **Exit criterion:** Provider `stop` correctly resumes the session when durable objectives remain, and tests prove the guard's boundaries.
+
 ## Test Matrix
 
 | Area | Required evidence |

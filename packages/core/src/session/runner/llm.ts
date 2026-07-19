@@ -33,6 +33,8 @@ import { SessionSchema } from "../schema"
 import { SessionStore } from "../store"
 import { type RunError, Service } from "./index"
 import { SessionRunnerModel } from "./model"
+import { CompletionPolicy } from "../completion-policy"
+import { SessionMessage } from "../message"
 import { createLLMEventPublisher } from "./publish-llm-event"
 import { toLLMMessages } from "./to-llm-message"
 import { MAX_STEPS_PROMPT } from "./max-steps"
@@ -106,6 +108,7 @@ const layer = Layer.effect(
     const config = yield* Config.Service
     const snapshots = yield* Snapshot.Service
     const db = (yield* Database.Service).db
+    const completionPolicy = yield* CompletionPolicy.Service
     const compaction = SessionCompaction.make({ events, llm, config: yield* config.entries() })
     const getSession = Effect.fn("SessionRunner.getSession")(function* (sessionID: SessionSchema.ID) {
       const session = yield* store.get(sessionID)
@@ -390,6 +393,7 @@ const layer = Layer.effect(
       yield* failInterruptedTools(input.sessionID)
       let promotion: SessionInput.Delivery | undefined = hasSteer ? "steer" : hasQueue ? "queue" : undefined
       let shouldRun = input.force || hasSteer || hasQueue
+      let autoContinuations = 0
       while (shouldRun) {
         let needsContinuation = true
         let step = 1
@@ -397,8 +401,40 @@ const layer = Layer.effect(
           const result = yield* runTurn(input.sessionID, promotion, step)
           needsContinuation = result.needsContinuation
           step = result.step + 1
+
+          if (promotion === "steer" || promotion === "queue") {
+            autoContinuations = 0 // Reset budget on user input
+          }
+
           promotion = "steer"
           if (!needsContinuation) needsContinuation = yield* SessionInput.hasPending(db, input.sessionID, "steer")
+
+          // Evaluate Completion Guard
+          if (!needsContinuation) {
+            const guard = yield* completionPolicy.evaluate(input.sessionID)
+            if (guard.needsContinuation) {
+              if (autoContinuations >= 5) {
+                const eventID = SessionMessage.ID.create()
+                yield* events.publish(SessionEvent.Synthetic, {
+                  sessionID: input.sessionID,
+                  messageID: eventID,
+                  text: "Automatic continuation limit reached. The run is blocked. Please resolve any outstanding tasks or blockers manually.",
+                  timestamp: yield* DateTime.now,
+                })
+                break
+              }
+              autoContinuations++
+              const instruction = guard.instruction ?? "Please proceed with pending work."
+              const eventID = SessionMessage.ID.create()
+              yield* events.publish(SessionEvent.Synthetic, {
+                sessionID: input.sessionID,
+                messageID: eventID,
+                text: instruction,
+                timestamp: yield* DateTime.now,
+              })
+              needsContinuation = true
+            }
+          }
         }
         shouldRun = yield* SessionInput.hasPending(db, input.sessionID, "queue")
         promotion = shouldRun ? "queue" : undefined
@@ -428,5 +464,6 @@ export const node = makeLocationNode({
     Config.node,
     Snapshot.node,
     Database.node,
+    CompletionPolicy.node,
   ],
 })

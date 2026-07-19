@@ -129,4 +129,6 @@ Enforce context limits explicitly during named-team and global overrides configu
 ### 9.6 Model and Context-Limit Resolution
 - **Decision**: Resolved using a 6-tier precedence list. The computed token size must be verified against the catalog maximum and must never exceed it.
 
-
+### 9.7 Objective Completion Guard
+- **Decision**: Prevent agents from prematurely halting work by validating objective state before accepting a provider `stop`. A shared `CompletionPolicy` evaluates whether `TeamTask`s or `SessionTodo`s remain non-terminal. If unfinished work remains, OpenCode automatically schedules an inline continuation turn using a synthetic instruction. To prevent runaway loops, an automatic continuation budget is enforced (currently set to 5), which resets only upon new user input.
+- **Rationale**: Mitigates "checkpointing" behavior where models emit partial progress summaries and stop instead of fulfilling remaining constraints, preventing the system from appearing idle while durable objectives are still pending.

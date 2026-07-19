@@ -17,12 +17,14 @@ export interface Interface {
   }) => Effect.Effect<Team.RunInfo>
 
   readonly getRun: (runID: Team.RunID) => Effect.Effect<Team.RunInfo | undefined>
+  readonly getRunBySession: (sessionID: string) => Effect.Effect<Team.RunInfo | undefined>
 
   readonly listRuns: () => Effect.Effect<Team.RunInfo[]>
 
   readonly listTasks: (runID: Team.RunID) => Effect.Effect<Team.TaskInfo[]>
 
   readonly getTask: (runID: Team.RunID, taskID: Team.TaskID) => Effect.Effect<Team.TaskInfo | undefined>
+  readonly getTaskBySession: (sessionID: string) => Effect.Effect<Team.TaskInfo | undefined>
 
   readonly createTask: (input: {
     readonly runID: Team.RunID
@@ -113,6 +115,26 @@ const layer = Layer.effect(
       }
     })
 
+    const getRunBySession = Effect.fn("TeamService.getRunBySession")(function* (sessionID: string) {
+      const row = yield* db
+        .select()
+        .from(TeamRunTable)
+        .where(eq(TeamRunTable.session_id, sessionID))
+        .get()
+        .pipe(Effect.orDie)
+
+      if (!row) return undefined
+
+      return {
+        id: Team.RunID.make(row.id),
+        sessionID: Schema.decodeUnknownSync(Team.RunInfo.fields.sessionID)(row.session_id),
+        teamName: row.team_name,
+        status: row.status as Team.RunInfo["status"],
+        timeCreated: Schema.decodeUnknownSync(Team.RunInfo.fields.timeCreated)(row.time_created),
+        timeUpdated: Schema.decodeUnknownSync(Team.RunInfo.fields.timeUpdated)(row.time_updated),
+      }
+    })
+
     const listRuns = Effect.fn("TeamService.listRuns")(function* () {
       const rows = yield* db.select().from(TeamRunTable).all().pipe(Effect.orDie)
       return rows.map((row) => ({
@@ -175,6 +197,36 @@ const layer = Layer.effect(
         contextLimit: row.context_limit || undefined,
         timeCreated: DateTime.makeUnsafe(row.time_created),
         timeUpdated: DateTime.makeUnsafe(row.time_updated),
+      }
+    })
+
+    const getTaskBySession = Effect.fn("TeamService.getTaskBySession")(function* (sessionID: string) {
+      const row = yield* db
+        .select()
+        .from(TeamTaskTable)
+        .where(eq(TeamTaskTable.session_id, sessionID))
+        .get()
+        .pipe(Effect.orDie)
+
+      if (!row) return undefined
+
+      return {
+        id: Team.TaskID.make(row.id),
+        runID: Team.RunID.make(row.run_id),
+        sessionID: row.session_id ? Schema.decodeUnknownSync(Team.TaskInfo.fields.sessionID)(row.session_id) : undefined,
+        description: row.description,
+        prompt: row.prompt,
+        role: row.role as Team.TaskInfo["role"],
+        status: row.status as Team.TaskInfo["status"],
+        dependencies: JSON.parse(row.dependencies) as Team.TaskID[],
+        claimedPaths: row.claimed_paths ? (JSON.parse(row.claimed_paths) as string[]) : undefined,
+        workspace: row.workspace as "worktree" | "shared" | undefined,
+        workspacePath: row.workspace_path ?? undefined,
+        provider: row.provider ?? undefined,
+        model: row.model ?? undefined,
+        contextLimit: row.context_limit ?? undefined,
+        timeCreated: Schema.decodeUnknownSync(Team.TaskInfo.fields.timeCreated)(row.time_created),
+        timeUpdated: Schema.decodeUnknownSync(Team.TaskInfo.fields.timeUpdated)(row.time_updated),
       }
     })
 
@@ -466,9 +518,11 @@ const layer = Layer.effect(
     return Service.of({
       createRun,
       getRun,
+      getRunBySession,
       listRuns,
       listTasks,
       getTask,
+      getTaskBySession,
       createTask,
       leaseTask,
       completeTask,

@@ -29,6 +29,8 @@ import { ProviderAuth } from "@/provider/auth"
 import { Provider } from "@/provider/provider"
 import { Question } from "@/question"
 import { TeamService } from "@opencode-ai/core/team"
+import { TeamScheduler } from "@/team/scheduler"
+import { AppProcess } from "@opencode-ai/core/process"
 import { SessionCompaction } from "@/session/compaction"
 import { Instruction } from "@/session/instruction"
 import { LLM } from "@/session/llm"
@@ -268,6 +270,8 @@ const app = LayerNode.group([
   ProjectCopy.node,
   PtyTicket.node,
   TeamService.node,
+  AppProcess.node,
+  TeamScheduler.node,
 ])
 
 export function createRoutes(
