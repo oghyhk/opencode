@@ -27,6 +27,7 @@ export const Info = Schema.Struct({
   hidden: Schema.Boolean,
   color: Color.pipe(optional),
   steps: PositiveInt.pipe(optional),
+  max_continuations: PositiveInt.pipe(optional),
   permissions: Permission.Ruleset,
 })
   .annotate({ identifier: "AgentV2.Info" })

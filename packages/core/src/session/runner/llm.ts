@@ -394,6 +394,7 @@ const layer = Layer.effect(
       let promotion: SessionInput.Delivery | undefined = hasSteer ? "steer" : hasQueue ? "queue" : undefined
       let shouldRun = input.force || hasSteer || hasQueue
       let autoContinuations = 0
+      
       while (shouldRun) {
         let needsContinuation = true
         let step = 1
@@ -402,18 +403,24 @@ const layer = Layer.effect(
           needsContinuation = result.needsContinuation
           step = result.step + 1
 
-          if (promotion === "steer" || promotion === "queue") {
-            autoContinuations = 0 // Reset budget on user input
+          const hasNewSteer = yield* SessionInput.hasPending(db, input.sessionID, "steer")
+          if (hasNewSteer) {
+            autoContinuations = 0 // Reset budget on real user input
+            needsContinuation = true
+            promotion = "steer"
+          } else {
+            promotion = undefined
           }
-
-          promotion = "steer"
-          if (!needsContinuation) needsContinuation = yield* SessionInput.hasPending(db, input.sessionID, "steer")
 
           // Evaluate Completion Guard
           if (!needsContinuation) {
+            const session = yield* getSession(input.sessionID)
+            const agent = yield* agents.select(session.agent)
+            const limit = agent.info?.max_continuations ?? 5
+            
             const guard = yield* completionPolicy.evaluate(input.sessionID)
             if (guard.needsContinuation) {
-              if (autoContinuations >= 5) {
+              if (autoContinuations >= limit) {
                 const eventID = SessionMessage.ID.create()
                 yield* events.publish(SessionEvent.Synthetic, {
                   sessionID: input.sessionID,
@@ -438,6 +445,7 @@ const layer = Layer.effect(
         }
         shouldRun = yield* SessionInput.hasPending(db, input.sessionID, "queue")
         promotion = shouldRun ? "queue" : undefined
+        if (shouldRun) autoContinuations = 0 // Queue items also act as user input
       }
     })
 

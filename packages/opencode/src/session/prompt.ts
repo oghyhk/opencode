@@ -1319,10 +1319,12 @@ const layer = Layer.effect(
               }
             }
 
-            if (result === "stop") {
-              const guard = yield* completionPolicy.evaluate(sessionID)
-              if (guard.needsContinuation) {
-                if (autoContinuations >= 5) {
+              if (result === "stop") {
+                const guard = yield* completionPolicy.evaluate(sessionID)
+                if (guard.needsContinuation) {
+                  const agent = yield* agents.get(lastUser.agent).pipe(Effect.orDie)
+                  const limit = 5 // max_continuations not supported in V1 config
+                  if (autoContinuations >= limit) {
                   const errorMsg = new SessionV1.APIError({
                     message: "Automatic continuation limit reached. The run is blocked. Please resolve any outstanding tasks or blockers manually.",
                     isRetryable: false,

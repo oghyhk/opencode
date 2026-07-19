@@ -5,7 +5,7 @@ import { Database } from "../database/database"
 import { TeamRunTable, TeamTaskTable, TaskAttemptTable, TaskArtifactTable, VerificationTable } from "./sql"
 import { Team } from "@opencode-ai/schema/team"
 import { eq, and, or, lt } from "drizzle-orm"
-import { makeLocationNode } from "../effect/app-node"
+import { makeGlobalNode } from "../effect/app-node"
 import { EventV2 } from "../event"
 import { DateTime } from "effect"
 import { SessionV2 } from "../session"
@@ -45,14 +45,20 @@ export interface Interface {
 
   readonly completeTask: (input: {
     readonly taskID: Team.TaskID
+    readonly ownerID: string
     readonly output: string
     readonly cost: number
     readonly tokensInput: number
     readonly tokensOutput: number
     readonly artifacts: readonly { readonly type: string; readonly path: string; readonly content?: string }[]
+    readonly statusOverride?: "awaiting-verification" | "blocked" | "accepted" | "failed"
   }) => Effect.Effect<void>
 
-  readonly failTask: (taskID: Team.TaskID, error: string) => Effect.Effect<void>
+  readonly failTask: (input: {
+    readonly taskID: Team.TaskID
+    readonly ownerID?: string
+    readonly error: string
+  }) => Effect.Effect<void>
 
   readonly cancelRun: (runID: Team.RunID) => Effect.Effect<void, never, SessionV2.Service>
 
@@ -380,20 +386,35 @@ const layer = Layer.effect(
 
     const completeTask = Effect.fn("TeamService.completeTask")(function* (input: {
       readonly taskID: Team.TaskID
+      readonly ownerID: string
       readonly output: string
       readonly cost: number
       readonly tokensInput: number
       readonly tokensOutput: number
       readonly artifacts: readonly { readonly type: string; readonly path: string; readonly content?: string }[]
+      readonly statusOverride?: "awaiting-verification" | "blocked" | "accepted" | "failed"
     }) {
       const now = Date.now()
+      const newStatus = input.statusOverride ?? "awaiting-verification"
       yield* db
         .transaction((tx) =>
           Effect.gen(function* () {
-            // 1. Update task status to awaiting-verification
+            // Check ownership before completing
+            const task = yield* tx
+              .select()
+              .from(TeamTaskTable)
+              .where(eq(TeamTaskTable.id, input.taskID))
+              .get()
+              .pipe(Effect.orDie)
+
+            if (!task || task.lease_owner !== input.ownerID) {
+              return yield* Effect.fail(new Error("Cannot complete task: lease owner mismatch or task not found."))
+            }
+
+            // 1. Update task status
             yield* tx
               .update(TeamTaskTable)
-              .set({ status: "awaiting-verification", time_updated: now })
+              .set({ status: newStatus, time_updated: now, lease_owner: null, lease_expires_at: null })
               .where(eq(TeamTaskTable.id, input.taskID))
               .run()
               .pipe(Effect.orDie)
@@ -437,15 +458,31 @@ const layer = Layer.effect(
         .pipe(Effect.orDie)
     })
 
-    const failTask = Effect.fn("TeamService.failTask")(function* (taskID: Team.TaskID, error: string) {
+    const failTask = Effect.fn("TeamService.failTask")(function* (input: {
+      readonly taskID: Team.TaskID
+      readonly ownerID?: string
+      readonly error: string
+    }) {
       const now = Date.now()
       yield* db
         .transaction((tx) =>
           Effect.gen(function* () {
+            const task = yield* tx
+              .select()
+              .from(TeamTaskTable)
+              .where(eq(TeamTaskTable.id, input.taskID))
+              .get()
+              .pipe(Effect.orDie)
+
+            if (!task) return yield* Effect.fail(new Error("Cannot fail task: task not found."))
+            if (input.ownerID && task.lease_owner !== input.ownerID) {
+              return yield* Effect.fail(new Error("Cannot fail task: lease owner mismatch."))
+            }
+
             yield* tx
               .update(TeamTaskTable)
-              .set({ status: "failed", time_updated: now })
-              .where(eq(TeamTaskTable.id, taskID))
+              .set({ status: "failed", time_updated: now, lease_owner: null, lease_expires_at: null })
+              .where(eq(TeamTaskTable.id, input.taskID))
               .run()
               .pipe(Effect.orDie)
 
@@ -454,9 +491,9 @@ const layer = Layer.effect(
               .insert(TaskAttemptTable)
               .values({
                 id: attemptID,
-                task_id: taskID,
+                task_id: input.taskID,
                 status: "failed",
-                output: error,
+                output: input.error,
                 time_created: now,
                 time_completed: now,
               })
@@ -579,7 +616,7 @@ const layer = Layer.effect(
   }),
 )
 
-export const node = makeLocationNode({
+export const node = makeGlobalNode({
   service: Service,
   layer,
   deps: [Database.node, EventV2.node],

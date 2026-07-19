@@ -160,18 +160,107 @@ export const GoogleAntigravityPlugin = define({
       })
 
       // Natively register the models in the catalog
+      // 1. antigravity-gemini-3.5-flash
       catalog.model.update(providerID, ModelV2.ID.make("antigravity-gemini-3.5-flash"), (model: any) => {
         model.name = "Gemini 3.5 Flash (Antigravity)"
         model.api = { id: "gemini-3.5-flash", type: "aisdk", package: "@ai-sdk/google", url: "https://cloudcode-pa.googleapis.com" }
         model.capabilities = { tools: true, input: ["text", "image", "pdf"], output: ["text"] }
         model.limit = { context: 1048576, output: 65536 }
+        model.variants = [
+          { id: "low", headers: {}, body: { thinkingConfig: { includeThoughts: true, thinkingLevel: "low" } } },
+          { id: "medium", headers: {}, body: { thinkingConfig: { includeThoughts: true, thinkingLevel: "medium" } } },
+          { id: "high", headers: {}, body: { thinkingConfig: { includeThoughts: true, thinkingLevel: "high" } } }
+        ]
+        model.request.variant = "medium"
       })
 
+      // 2. antigravity-gemini-3.1-flash
+      catalog.model.update(providerID, ModelV2.ID.make("antigravity-gemini-3.1-flash"), (model: any) => {
+        model.name = "Gemini 3.1 Flash (Antigravity)"
+        model.api = { id: "gemini-3.1-flash", type: "aisdk", package: "@ai-sdk/google", url: "https://cloudcode-pa.googleapis.com" }
+        model.capabilities = { tools: true, input: ["text", "image", "pdf"], output: ["text"] }
+        model.limit = { context: 1048576, output: 65536 }
+        model.variants = [
+          { id: "low", headers: {}, body: { thinkingConfig: { includeThoughts: true, thinkingLevel: "low" } } },
+          { id: "medium", headers: {}, body: { thinkingConfig: { includeThoughts: true, thinkingLevel: "medium" } } },
+          { id: "high", headers: {}, body: { thinkingConfig: { includeThoughts: true, thinkingLevel: "high" } } }
+        ]
+        model.request.variant = "medium"
+      })
+
+      // 3. antigravity-gemini-3-flash
+      catalog.model.update(providerID, ModelV2.ID.make("antigravity-gemini-3-flash"), (model: any) => {
+        model.name = "Gemini 3 Flash (Antigravity)"
+        model.api = { id: "gemini-3-flash", type: "aisdk", package: "@ai-sdk/google", url: "https://cloudcode-pa.googleapis.com" }
+        model.capabilities = { tools: true, input: ["text", "image", "pdf"], output: ["text"] }
+        model.limit = { context: 1048576, output: 65536 }
+        model.variants = [
+          { id: "low", headers: {}, body: { thinkingConfig: { includeThoughts: true, thinkingLevel: "low" } } },
+          { id: "medium", headers: {}, body: { thinkingConfig: { includeThoughts: true, thinkingLevel: "medium" } } },
+          { id: "high", headers: {}, body: { thinkingConfig: { includeThoughts: true, thinkingLevel: "high" } } }
+        ]
+        model.request.variant = "medium"
+      })
+
+      // 4. antigravity-gemini-3.5-pro
+      catalog.model.update(providerID, ModelV2.ID.make("antigravity-gemini-3.5-pro"), (model: any) => {
+        model.name = "Gemini 3.5 Pro (Antigravity)"
+        model.api = { id: "gemini-3.5-pro", type: "aisdk", package: "@ai-sdk/google", url: "https://cloudcode-pa.googleapis.com" }
+        model.capabilities = { tools: true, input: ["text", "image", "pdf"], output: ["text"] }
+        model.limit = { context: 1048576, output: 65535 }
+        model.variants = [
+          { id: "low", headers: {}, body: { thinkingLevel: "low" } },
+          { id: "high", headers: {}, body: { thinkingLevel: "high" } }
+        ]
+        model.request.variant = "low"
+      })
+
+      // 5. antigravity-gemini-3.1-pro
+      catalog.model.update(providerID, ModelV2.ID.make("antigravity-gemini-3.1-pro"), (model: any) => {
+        model.name = "Gemini 3.1 Pro (Antigravity)"
+        model.api = { id: "gemini-3.1-pro", type: "aisdk", package: "@ai-sdk/google", url: "https://cloudcode-pa.googleapis.com" }
+        model.capabilities = { tools: true, input: ["text", "image", "pdf"], output: ["text"] }
+        model.limit = { context: 1048576, output: 65535 }
+        model.variants = [
+          { id: "low", headers: {}, body: { thinkingLevel: "low" } },
+          { id: "high", headers: {}, body: { thinkingLevel: "high" } }
+        ]
+        model.request.variant = "low"
+      })
+
+      // 6. antigravity-gemini-3-pro
+      catalog.model.update(providerID, ModelV2.ID.make("antigravity-gemini-3-pro"), (model: any) => {
+        model.name = "Gemini 3 Pro (Antigravity)"
+        model.api = { id: "gemini-3-pro", type: "aisdk", package: "@ai-sdk/google", url: "https://cloudcode-pa.googleapis.com" }
+        model.capabilities = { tools: true, input: ["text", "image", "pdf"], output: ["text"] }
+        model.limit = { context: 1048576, output: 65535 }
+        model.variants = [
+          { id: "low", headers: {}, body: { thinkingLevel: "low" } },
+          { id: "high", headers: {}, body: { thinkingLevel: "high" } }
+        ]
+        model.request.variant = "low"
+      })
+
+      // 7. antigravity-claude-opus-4-6-thinking
       catalog.model.update(providerID, ModelV2.ID.make("antigravity-claude-opus-4-6-thinking"), (model: any) => {
         model.name = "Claude Opus 4.6 Thinking (Antigravity)"
-        model.api = { id: "claude-opus-4-6", type: "aisdk", package: "@ai-sdk/google", url: "https://cloudcode-pa.googleapis.com" }
+        model.api = { id: "claude-opus-4-6-thinking", type: "aisdk", package: "@ai-sdk/google", url: "https://cloudcode-pa.googleapis.com" }
         model.capabilities = { tools: true, input: ["text", "image", "pdf"], output: ["text"] }
         model.limit = { context: 200000, output: 64000 }
+        model.variants = [
+          { id: "low", headers: {}, body: { thinkingConfig: { thinkingBudget: 8192 } } },
+          { id: "max", headers: {}, body: { thinkingConfig: { thinkingBudget: 32768 } } }
+        ]
+        model.request.variant = "max"
+      })
+
+      // 8. antigravity-claude-sonnet-4-6
+      catalog.model.update(providerID, ModelV2.ID.make("antigravity-claude-sonnet-4-6"), (model: any) => {
+        model.name = "Claude Sonnet 4.6 (Antigravity)"
+        model.api = { id: "claude-sonnet-4-6", type: "aisdk", package: "@ai-sdk/google", url: "https://cloudcode-pa.googleapis.com" }
+        model.capabilities = { tools: true, input: ["text", "image", "pdf"], output: ["text"] }
+        model.limit = { context: 200000, output: 64000 }
+        model.variants = []
       })
     })
 
@@ -186,9 +275,105 @@ export const GoogleAntigravityPlugin = define({
         const credential = connection ? yield* ctx.integration.connection.resolve(connection).pipe(Effect.orDie) : undefined
         const token = credential && credential.type === "oauth" ? credential.access : ""
 
+        const getThinkingLevel = (parsed: any): string | undefined => {
+          if (typeof parsed.thinkingLevel === "string") return parsed.thinkingLevel
+          if (parsed.thinkingConfig && typeof parsed.thinkingConfig.thinkingLevel === "string") return parsed.thinkingConfig.thinkingLevel
+          if (parsed.generationConfig?.thinkingConfig && typeof parsed.generationConfig.thinkingConfig.thinkingLevel === "string") {
+            return parsed.generationConfig.thinkingConfig.thinkingLevel
+          }
+          if (parsed.providerOptions?.google && typeof parsed.providerOptions.google.thinkingLevel === "string") {
+            return parsed.providerOptions.google.thinkingLevel
+          }
+          if (evt.options && typeof evt.options.thinkingLevel === "string") {
+            return evt.options.thinkingLevel
+          }
+          if (evt.options?.thinkingConfig && typeof evt.options.thinkingConfig.thinkingLevel === "string") {
+            return evt.options.thinkingConfig.thinkingLevel
+          }
+          return undefined
+        }
+
+        const getThinkingBudget = (parsed: any): number => {
+          if (parsed.thinkingConfig && typeof parsed.thinkingConfig.thinkingBudget === "number") {
+            return parsed.thinkingConfig.thinkingBudget
+          }
+          if (parsed.generationConfig?.thinkingConfig && typeof parsed.generationConfig.thinkingConfig.thinkingBudget === "number") {
+            return parsed.generationConfig.thinkingConfig.thinkingBudget
+          }
+          if (parsed.providerOptions?.google?.thinkingConfig && typeof parsed.providerOptions.google.thinkingConfig.thinkingBudget === "number") {
+            return parsed.providerOptions.google.thinkingConfig.thinkingBudget
+          }
+          if (evt.options && typeof evt.options.thinkingBudget === "number") {
+            return evt.options.thinkingBudget
+          }
+          if (evt.options?.thinkingConfig && typeof evt.options.thinkingConfig.thinkingBudget === "number") {
+            return evt.options.thinkingConfig.thinkingBudget
+          }
+          return 32768
+        }
+
+        const resolveBackendModel = (lowerModel: string, parsed: any): string => {
+          if (lowerModel.includes("gemini-3.5-flash")) {
+            return "gemini-3.5-flash-low"
+          }
+          if (lowerModel.includes("gemini-3.1-flash")) {
+            return "gemini-3.1-flash"
+          }
+          if (lowerModel.includes("gemini-3-flash")) {
+            return "gemini-3-flash"
+          }
+          if (lowerModel.includes("gemini-3.5-pro")) {
+            const level = getThinkingLevel(parsed) === "high" ? "high" : "low"
+            return `gemini-3.5-pro-${level}`
+          }
+          if (lowerModel.includes("gemini-3.1-pro")) {
+            const level = getThinkingLevel(parsed) === "high" ? "high" : "low"
+            return `gemini-3.1-pro-${level}`
+          }
+          if (lowerModel.includes("gemini-3-pro")) {
+            const level = getThinkingLevel(parsed) === "high" ? "high" : "low"
+            return `gemini-3-pro-${level}`
+          }
+          if (lowerModel.includes("claude-opus-4-6-thinking")) {
+            return "claude-opus-4-6-thinking"
+          }
+          if (lowerModel.includes("claude-sonnet-4-6")) {
+            return "claude-sonnet-4-6"
+          }
+          return lowerModel
+        }
+
         const customFetch = async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
           const targetUrl = typeof url === "string" ? url : url instanceof Request ? url.url : url.toString()
-          if (!targetUrl.includes("generativelanguage.googleapis.com") && !targetUrl.includes("cloudcode-pa.googleapis.com")) {
+          const isGoogleEndpoint = targetUrl.includes("generativelanguage.googleapis.com") || targetUrl.includes("cloudcode-pa.googleapis.com")
+          if (!isGoogleEndpoint) {
+            return fetch(url, init)
+          }
+
+          const match = targetUrl.match(/\/models\/([^:/?]+)/)
+          const extractedModel = match ? match[1] : ""
+          const lowerModel = extractedModel.toLowerCase()
+
+          const antigravityModels = [
+            "gemini-3.5-flash",
+            "gemini-3.1-flash",
+            "gemini-3-flash",
+            "gemini-3.5-pro",
+            "gemini-3.1-pro",
+            "gemini-3-pro",
+            "claude-opus-4-6-thinking",
+            "claude-sonnet-4-6",
+            "antigravity-gemini-3.5-flash",
+            "antigravity-gemini-3.1-flash",
+            "antigravity-gemini-3-flash",
+            "antigravity-gemini-3.5-pro",
+            "antigravity-gemini-3.1-pro",
+            "antigravity-gemini-3-pro",
+            "antigravity-claude-opus-4-6-thinking",
+            "antigravity-claude-sonnet-4-6"
+          ]
+
+          if (!antigravityModels.includes(lowerModel)) {
             return fetch(url, init)
           }
 
@@ -197,25 +382,76 @@ export const GoogleAntigravityPlugin = define({
             initHeaders.set("Authorization", `Bearer ${token}`)
           }
 
-          let bodyText = ""
-          if (init?.body) {
-            bodyText = typeof init.body === "string" ? init.body : new TextDecoder().decode(init.body as ArrayBuffer)
-          }
+          const bodyText = init?.body
+            ? typeof init.body === "string"
+              ? init.body
+              : new TextDecoder().decode(init.body as ArrayBuffer)
+            : ""
 
-          // Wrap payload in Antigravity envelope format
           const parsed = JSON.parse(bodyText || "{}")
-          const envelope = {
-            project: "rising-fact-p41fc", // Default daily project
-            model: "gemini-3.5-flash",
-            request: parsed,
+
+          // Apply model transformations and resolve backend model name
+          const resolvedBackendModel = resolveBackendModel(lowerModel, parsed)
+
+          // Mutate parsed body in place to match backend expectations
+          if (lowerModel.includes("flash")) {
+            const level = getThinkingLevel(parsed) || "medium"
+            delete parsed.thinkingLevel
+            if (parsed.thinkingConfig) delete parsed.thinkingConfig.thinkingLevel
+            parsed.generationConfig = parsed.generationConfig || {}
+            parsed.generationConfig.thinkingConfig = {
+              includeThoughts: true,
+              thinkingLevel: level
+            }
           }
 
-          const wrappedBody = JSON.stringify(envelope)
+          if (lowerModel.includes("pro")) {
+            delete parsed.thinkingLevel
+            if (parsed.thinkingConfig) delete parsed.thinkingConfig
+            if (parsed.generationConfig?.thinkingConfig) delete parsed.generationConfig.thinkingConfig
+            if (parsed.providerOptions?.google) {
+              delete parsed.providerOptions.google.thinkingLevel
+              if (Object.keys(parsed.providerOptions.google).length === 0) {
+                delete parsed.providerOptions.google
+              }
+            }
+            if (parsed.providerOptions && Object.keys(parsed.providerOptions).length === 0) {
+              delete parsed.providerOptions
+            }
+          }
+
+          if (lowerModel.includes("claude-opus-4-6-thinking")) {
+            const budget = getThinkingBudget(parsed)
+            delete parsed.thinkingLevel
+            if (parsed.thinkingConfig) delete parsed.thinkingConfig
+            parsed.generationConfig = parsed.generationConfig || {}
+            parsed.generationConfig.thinkingConfig = {
+              thinkingBudget: budget
+            }
+          }
+
+          if (lowerModel.includes("claude-sonnet-4-6")) {
+            delete parsed.thinkingLevel
+            if (parsed.thinkingConfig) delete parsed.thinkingConfig
+            if (parsed.generationConfig?.thinkingConfig) delete parsed.generationConfig.thinkingConfig
+          }
+
+          // TODO: project ID resolution from the authenticated account context is needed (7.3 scope)
+          const projectId = (credential?.metadata as any)?.projectId || "rising-fact-p41fc"
+
+          const envelope = {
+            project: projectId,
+            model: resolvedBackendModel,
+            request: parsed,
+            requestType: "agent",
+            userAgent: "antigravity",
+            requestId: `agent-${crypto.randomUUID()}`
+          }
 
           return fetch("https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse", {
             method: "POST",
             headers: initHeaders,
-            body: wrappedBody,
+            body: JSON.stringify(envelope),
           })
         }
 
