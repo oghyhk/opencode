@@ -1,4 +1,4 @@
-import { Config } from "@/config/config"
+import { Config } from "@opencode-ai/core/config"
 import { Catalog } from "@opencode-ai/core/catalog"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { ProviderV2 } from "@opencode-ai/core/provider"
@@ -30,12 +30,12 @@ export const resolveRoleConfig = (options: {
   Effect.gen(function* () {
     const config = yield* Config.Service
     const catalog = yield* Catalog.Service
-    const cfg = yield* config.get()
+    const cfg = yield* config.entries()
 
     // 1. Resolve precedence
-    const teamDefaults = cfg.team_defaults
-    const teams = cfg.team
-    const globalDefaultModel = cfg.model
+    const teamDefaults = Config.latest(cfg, "team_defaults")
+    const teams = Config.latest(cfg, "team")
+    const globalDefaultModel = Config.latest(cfg, "model")
 
     const teamConfig = options.teamName && teams ? teams[options.teamName] : undefined
 

@@ -1,15 +1,22 @@
 import { Context, Effect, Fiber, Layer, Queue, Schedule, Scope } from "effect"
 import { Database } from "@opencode-ai/core/database/database"
 import { TeamService } from "@opencode-ai/core/team"
-import { TeamRunTable, TeamTaskTable } from "@opencode-ai/core/team/sql"
+import { TaskAttemptTable, TeamRunTable, TeamTaskTable, VerificationTable, TaskArtifactTable } from "@opencode-ai/core/team/sql"
 import { Team } from "@opencode-ai/schema/team"
-import { eq, and } from "drizzle-orm"
+import { eq, and, desc } from "drizzle-orm"
 import { SessionV2 } from "@opencode-ai/core/session"
+import { resolveRoleConfig } from "./config-resolver"
+import { ModelV2 } from "@opencode-ai/core/model"
+import { ProviderV2 } from "@opencode-ai/core/provider"
 import { SessionEvent } from "@opencode-ai/core/session/event"
 import { SessionMessage } from "@opencode-ai/core/session/message"
+import { Config } from "@/config/config"
+import { Catalog } from "@opencode-ai/core/catalog"
 import { DateTime } from "effect"
 import { SessionExecution } from "@opencode-ai/core/session/execution"
-import { makeLocationNode } from "@opencode-ai/core/effect/app-node"
+import { LocationServiceMap } from "@opencode-ai/core/location-services"
+import { Location } from "@opencode-ai/core/location"
+import { makeGlobalNode } from "@opencode-ai/core/effect/app-node"
 import { EventV2 } from "@opencode-ai/core/event"
 import { AgentV2 } from "@opencode-ai/core/agent"
 import { AbsolutePath } from "@opencode-ai/core/schema"
@@ -18,7 +25,7 @@ import { AppProcess } from "@opencode-ai/core/process"
 import { ChildProcess } from "effect/unstable/process"
 
 export interface Interface {
-  readonly start: () => Effect.Effect<void, never, Scope.Scope | SessionV2.Service | SessionExecution.Service | EventV2.Service>
+  readonly start: () => Effect.Effect<void, never, Scope.Scope | SessionV2.Service | SessionExecution.Service | EventV2.Service | LocationServiceMap.Service>
   readonly trigger: () => Effect.Effect<void>
 }
 
@@ -124,16 +131,17 @@ const layer = Layer.effect(
           if (!leased) continue
 
           // Spawn the task runner as a background fiber
-          yield* startTaskRunner(leased, ownerID).pipe(
+          yield* startTaskRunner(leased, ownerID, runID).pipe(
             Effect.forkScoped,
           )
         }
       }
     })
 
-    const startTaskRunner = (task: Team.TaskInfo, ownerID: string) =>
+    const startTaskRunner = (task: Team.TaskInfo, ownerID: string, runID: Team.RunID) =>
       Effect.gen(function* () {
         const sessionService = yield* SessionV2.Service
+        const locations = yield* LocationServiceMap.Service
         const now = Date.now()
         // 1. Update status to running
         yield* db
@@ -145,8 +153,36 @@ const layer = Layer.effect(
 
         yield* Effect.logInfo(`Starting team task: ${task.description}`, { taskID: task.id })
 
-        const run = yield* team.getRun(task.runID)
+        const run = yield* team.getRun(runID)
         const parentID = run?.sessionID
+
+        const parentSession = parentID ? yield* sessionService.get(parentID).pipe(Effect.catchTag("Session.NotFoundError", () => Effect.succeed(undefined))) : undefined
+        const parentLocationRef = parentSession ? parentSession.location : Location.Ref.make({ directory: process.cwd() as any })
+        
+        const resolvedConfig = yield* Effect.provide(
+          resolveRoleConfig({
+            teamName: run?.teamName,
+            role: task.role,
+            taskOverride: {
+              provider: task.provider,
+              model: task.model,
+              contextLimit: task.contextLimit
+            }
+          }),
+          LocationServiceMap.Service.get(parentLocationRef)
+        )
+
+        // Update task with resolved config values
+        yield* db
+          .update(TeamTaskTable)
+          .set({ 
+            provider: resolvedConfig.providerID, 
+            model: resolvedConfig.modelID, 
+            context_limit: resolvedConfig.contextLimit 
+          })
+          .where(eq(TeamTaskTable.id, task.id))
+          .run()
+          .pipe(Effect.orDie)
 
         // Start heartbeat fiber
         const heartbeatFiber = yield* Effect.repeat(
@@ -180,8 +216,12 @@ const layer = Layer.effect(
           // Create child session
           const childSession = yield* sessionService.create({
             parentID,
-            agent: AgentV2.ID.make(task.role),
+            agent: AgentV2.ID.make(resolvedConfig.agentName ?? task.role),
             location: { directory: AbsolutePath.make(workspaceDir) },
+            model: {
+              providerID: resolvedConfig.providerID,
+              id: resolvedConfig.modelID
+            }
           })
 
           // Save session ID to task record
@@ -192,10 +232,23 @@ const layer = Layer.effect(
             .run()
             .pipe(Effect.orDie)
 
+          const verifications = yield* db
+            .select()
+            .from(VerificationTable)
+            .where(eq(VerificationTable.task_id, task.id))
+            .all()
+            .pipe(Effect.orDie)
+          
+          let taskPrompt = task.prompt
+          if (verifications.length > 0) {
+            const feedbacks = verifications.map(v => `- [${new Date(v.time_created).toISOString()}] Verifier feedback:\n${v.evidence}`).join("\n\n")
+            taskPrompt = `${task.prompt}\n\n--- PREVIOUS REVIEWS ---\n${feedbacks}\n\nPlease address the above feedback.`
+          }
+
           // Run prompt
           yield* sessionService.prompt({
             sessionID: childSession.id,
-            prompt: { text: task.prompt, agents: [] },
+            prompt: { text: taskPrompt, agents: [] },
           })
 
           // Wait for session loop to complete
@@ -208,6 +261,14 @@ const layer = Layer.effect(
             ? (lastMsg.content.findLast((p) => p.type === "text") as any)
             : undefined
           const outputText = textPart?.text || ""
+
+          // Check if the task was completed by the worker
+          const finalTask = yield* db.select().from(TeamTaskTable).where(eq(TeamTaskTable.id, task.id)).get().pipe(Effect.orDie)
+          if (!finalTask || (finalTask.status !== "awaiting-verification" && finalTask.status !== "accepted" && finalTask.status !== "planned" && finalTask.status !== "blocked")) {
+            // Task didn't complete via the tool contract
+            yield* team.failTask({ taskID: task.id, ownerID, error: "Worker session ended before satisfying completion contract." })
+            throw new Error("Worker session ended before satisfying completion contract.")
+          }
 
           // Capture git diff if executing inside isolated worktree
           let artifacts: Array<{ type: string; path: string; content?: string }> = []
@@ -226,43 +287,26 @@ const layer = Layer.effect(
             }
           }
 
-          // Complete task
-          yield* team.completeTask({
-            taskID: task.id,
-            output: outputText,
-            cost: 0,
-            tokensInput: 0,
-            tokensOutput: 0,
-            artifacts,
-          })
-
-          // Handle automatic verification dispatch and rework loops
-          if (task.role === "worker") {
-            const allTasks = yield* team.listTasks(task.runID)
-            const hasVerifier = allTasks.some((t) => t.role === "verifier" && t.dependencies.includes(task.id))
-            if (!hasVerifier) {
-              yield* team.createTask({
-                runID: task.runID,
-                description: `Verify task: ${task.description}`,
-                prompt: `Please verify the work done for task: ${task.description}\n\nWorker output:\n${outputText}\n\nReview the diff and output to verify correctness. Reply with "accepted" to approve, or describe the requested changes and include the word "rework" if rework is required.`,
-                role: "verifier",
-                dependencies: [task.id],
-              })
-            }
-          } else if (task.role === "verifier") {
-            // Find the worker task this verifier was checking
+          // If verifier, it was completed via the complete-task tool.
+          // We just log VerificationTable.
+          if (task.role === "verifier") {
             const workerTaskID = task.dependencies[0]
             if (workerTaskID) {
-              const isRework = outputText.toLowerCase().includes("rework")
+              const isRework = finalTask.status === "planned"
+              yield* db
+                .insert(VerificationTable)
+                .values({
+                  id: crypto.randomUUID(),
+                  task_id: workerTaskID,
+                  status: isRework ? "rework-required" : "accepted",
+                  evidence: outputText,
+                  time_created: Date.now(),
+                })
+                .run()
+                .pipe(Effect.orDie)
+
               if (isRework) {
                 yield* Effect.logInfo(`Verifier requested rework for task ${workerTaskID}`, { verifierTaskID: task.id })
-                // Reset worker task to planned to trigger retry/rework attempt
-                yield* db
-                  .update(TeamTaskTable)
-                  .set({ status: "planned", time_updated: Date.now() })
-                  .where(eq(TeamTaskTable.id, workerTaskID))
-                  .run()
-                  .pipe(Effect.orDie)
               } else {
                 yield* Effect.logInfo(`Verifier approved task ${workerTaskID}`, { verifierTaskID: task.id })
                 // Mark worker task as accepted
@@ -273,17 +317,50 @@ const layer = Layer.effect(
                   .run()
                   .pipe(Effect.orDie)
               }
-              // Mark verifier task as accepted
-              yield* db
-                .update(TeamTaskTable)
-                .set({ status: "accepted", time_updated: Date.now() })
-                .where(eq(TeamTaskTable.id, task.id))
-                .run()
+            }
+          } else {
+            // For workers, task was already completed by the complete-task tool.
+            // We just need to attach artifacts to the latest attempt.
+            if (artifacts.length > 0) {
+              const latestAttempt = yield* db
+                .select()
+                .from(TaskAttemptTable)
+                .where(eq(TaskAttemptTable.task_id, task.id))
+                .orderBy(desc(TaskAttemptTable.time_created))
+                .get()
                 .pipe(Effect.orDie)
+                
+              if (latestAttempt) {
+                for (const a of artifacts) {
+                  yield* db.insert(TaskArtifactTable).values({
+                    id: crypto.randomUUID(),
+                    task_id: task.id, // Should point to attempt_id, but schema uses task_id
+                    type: a.type,
+                    path: a.path,
+                    content: a.content,
+                    time_created: Date.now()
+                  }).run().pipe(Effect.orDie)
+                }
+              }
             }
           }
 
-            yield* Effect.logInfo(`Completed team task successfully: ${task.description}`, { taskID: task.id })
+          // Handle automatic verification dispatch and rework loops
+          if (task.role === "worker") {
+            const allTasks = yield* team.listTasks(task.runID)
+            const hasPendingVerifier = allTasks.some((t) => t.role === "verifier" && t.dependencies.includes(task.id) && t.status !== "accepted" && t.status !== "failed" && t.status !== "cancelled")
+            if (!hasPendingVerifier && finalTask.status === "awaiting-verification") {
+              yield* team.createTask({
+                runID: task.runID,
+                description: `Verify task: ${task.description}`,
+                prompt: `Please verify the work done for task: ${task.description}\n\nWorker output:\n${outputText}\n\nReview the diff and output to verify correctness. Use the complete-task tool with status 'accepted' to approve, or 'rework' if changes are required.`,
+                role: "verifier",
+                dependencies: [task.id],
+              })
+            }
+          }
+
+          yield* Effect.logInfo(`Completed team task successfully: ${task.description}`, { taskID: task.id })
             
             // Notify the orchestrator session
             const run = yield* team.getRun(task.runID)
@@ -307,14 +384,15 @@ const layer = Layer.effect(
             }
           } catch (error) {
             logError(task.id, error)
-            yield* team.failTask(task.id, String(error))
+            yield* team.failTask({ taskID: task.id, ownerID, error: String(error) }).pipe(Effect.ignore)
           } finally {
             // Stop heartbeat
             yield* Fiber.interrupt(heartbeatFiber)
-            // Cleanup worktree if created
-            if (hasWorktree && workspaceDir) {
-            yield* worktreeService.remove({ directory: workspaceDir }).pipe(Effect.ignore)
-          }
+            // Cleanup worktree if task is accepted
+            const finalTask = yield* db.select().from(TeamTaskTable).where(eq(TeamTaskTable.id, task.id)).get().pipe(Effect.orDie)
+            if (hasWorktree && workspaceDir && finalTask?.status === "accepted") {
+              yield* worktreeService.remove({ directory: workspaceDir }).pipe(Effect.ignore)
+            }
           // Trigger next iteration immediately
           yield* Queue.offer(triggerQueue, undefined)
         }
@@ -347,10 +425,10 @@ const layer = Layer.effect(
   }),
 )
 
-export const node = makeLocationNode({
+export const node = makeGlobalNode({
   service: Service,
   layer,
-  deps: [Database.node, TeamService.node, SessionV2.node, SessionExecution.node, EventV2.node, Worktree.node, AppProcess.node],
+  deps: [Database.node, TeamService.node, SessionV2.node, SessionExecution.node, EventV2.node, Worktree.node, AppProcess.node, LocationServiceMap.node],
 })
 
 export * as TeamScheduler from "./scheduler"

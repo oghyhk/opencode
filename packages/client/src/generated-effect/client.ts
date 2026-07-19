@@ -271,12 +271,21 @@ const Endpoint4_4 = (raw: RawClient["server.team"]) => (input: Endpoint4_4Input)
     Effect.map((value) => value.data),
   )
 
+type Endpoint4_5Request = Parameters<RawClient["server.team"]["team.cancelRun"]>[0]
+type Endpoint4_5Input = { readonly runID: Endpoint4_5Request["params"]["runID"] }
+const Endpoint4_5 = (raw: RawClient["server.team"]) => (input: Endpoint4_5Input) =>
+  raw["team.cancelRun"]({ params: { runID: input["runID"] } }).pipe(
+    Effect.mapError(mapClientError),
+    Effect.map((value) => value.data),
+  )
+
 const adaptGroup4 = (raw: RawClient["server.team"]) => ({
   listRuns: Endpoint4_0(raw),
   createRun: Endpoint4_1(raw),
   getRun: Endpoint4_2(raw),
   listTasks: Endpoint4_3(raw),
   getTask: Endpoint4_4(raw),
+  cancelRun: Endpoint4_5(raw),
 })
 
 type Endpoint5_0Request = Parameters<RawClient["server.message"]["session.messages"]>[0]

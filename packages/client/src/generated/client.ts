@@ -46,6 +46,8 @@ import type {
   ServerTeamListTasksOutput,
   ServerTeamGetTaskInput,
   ServerTeamGetTaskOutput,
+  ServerTeamCancelRunInput,
+  ServerTeamCancelRunOutput,
   MessagesListInput,
   MessagesListOutput,
   ModelsListInput,
@@ -547,6 +549,17 @@ export function make(options: ClientOptions) {
           {
             method: "GET",
             path: `/api/team/run/${encodeURIComponent(input.runID)}/task/${encodeURIComponent(input.taskID)}`,
+            successStatus: 200,
+            declaredStatuses: [500, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      cancelRun: (input: ServerTeamCancelRunInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: ServerTeamCancelRunOutput }>(
+          {
+            method: "POST",
+            path: `/api/team/run/${encodeURIComponent(input.runID)}/cancel`,
             successStatus: 200,
             declaredStatuses: [500, 401, 400],
             empty: false,

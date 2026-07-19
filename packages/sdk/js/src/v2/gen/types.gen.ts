@@ -2023,6 +2023,11 @@ export type Config = {
     mcp_timeout?: number
     policies?: Array<ConfigV2ExperimentalPolicy>
   }
+  team_defaults?: ConfigV2TeamConfig
+  team?: {
+    [key: string]: ConfigV2TeamConfig
+  }
+  default_team?: string
 }
 
 export type Model = {
@@ -2597,6 +2602,29 @@ export type SessionBusyError = {
   message: string
 }
 
+export type UnauthorizedError = {
+  _tag: "UnauthorizedError"
+  message: string
+}
+
+export type SessionNotFoundError = {
+  _tag: "SessionNotFoundError"
+  sessionID: string
+  message: string
+}
+
+export type TeamRunNotFound = {
+  _tag: "TeamRunNotFound"
+  runID: string
+  message: string
+}
+
+export type TeamTaskNotFound = {
+  _tag: "TeamTaskNotFound"
+  taskID: string
+  message: string
+}
+
 export type EventTuiPromptAppend = {
   type: "tui.prompt.append"
   properties: {
@@ -2673,11 +2701,6 @@ export type WorkspaceWarpError = {
   }
 }
 
-export type UnauthorizedError = {
-  _tag: "UnauthorizedError"
-  message: string
-}
-
 export type SessionsResponse = {
   data: Array<SessionV2Info>
   cursor: {
@@ -2693,12 +2716,6 @@ export type InvalidCursorError = {
 
 export type SessionActive = {
   type: "running"
-}
-
-export type SessionNotFoundError = {
-  _tag: "SessionNotFoundError"
-  sessionID: string
-  message: string
 }
 
 export type PromptInput = {
@@ -3840,6 +3857,23 @@ export type ConfigV2ExperimentalPolicy = {
   resource: string
 }
 
+export type ConfigV2TeamRole = {
+  provider?: string
+  model?: string
+  variant?: string
+  context_limit?: number
+  agent?: string
+  concurrency?: number
+  workspace?: "worktree" | "shared"
+}
+
+export type ConfigV2TeamConfig = {
+  orchestrator?: ConfigV2TeamRole
+  worker?: ConfigV2TeamRole
+  verifier?: ConfigV2TeamRole
+  context_limit?: number
+}
+
 export type ProjectDirectories = Array<{
   directory: string
   strategy?: string
@@ -3848,6 +3882,46 @@ export type ProjectDirectories = Array<{
 export type PtyTicketConnectToken = {
   ticket: string
   expires_in: number
+}
+
+export type TeamRunInfo = {
+  id: string
+  sessionID: string
+  teamName: string
+  status: "running" | "completed" | "failed" | "cancelled"
+  timeCreated: number
+  timeUpdated: number
+}
+
+export type TeamTaskInfo = {
+  id: string
+  runID: string
+  sessionID?: string
+  description: string
+  prompt: string
+  role: "worker" | "verifier"
+  status:
+    | "planned"
+    | "ready"
+    | "leased"
+    | "running"
+    | "awaiting-verification"
+    | "rework"
+    | "accepted"
+    | "failed"
+    | "cancelled"
+    | "blocked"
+  dependencies: Array<string>
+  claimedPaths?: Array<string>
+  workspace?: "worktree" | "shared"
+  workspacePath?: string
+  provider?: string
+  model?: string
+  contextLimit?: number
+  leaseOwner?: string
+  leaseExpiresAt?: number
+  timeCreated: number
+  timeUpdated: number
 }
 
 export type WorkspaceEventConnectionStatus = {
@@ -10471,6 +10545,226 @@ export type PartUpdateResponses = {
 }
 
 export type PartUpdateResponse = PartUpdateResponses[keyof PartUpdateResponses]
+
+export type V2TeamRunListData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/api/team/run"
+}
+
+export type V2TeamRunListErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2TeamRunListError = V2TeamRunListErrors[keyof V2TeamRunListErrors]
+
+export type V2TeamRunListResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: Array<TeamRunInfo>
+  }
+}
+
+export type V2TeamRunListResponse = V2TeamRunListResponses[keyof V2TeamRunListResponses]
+
+export type V2TeamRunCreateData = {
+  body: {
+    sessionID: string
+    teamName: string
+  }
+  path?: never
+  query?: never
+  url: "/api/team/run"
+}
+
+export type V2TeamRunCreateErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * SessionNotFoundError
+   */
+  404: SessionNotFoundError
+}
+
+export type V2TeamRunCreateError = V2TeamRunCreateErrors[keyof V2TeamRunCreateErrors]
+
+export type V2TeamRunCreateResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: TeamRunInfo
+  }
+}
+
+export type V2TeamRunCreateResponse = V2TeamRunCreateResponses[keyof V2TeamRunCreateResponses]
+
+export type V2TeamRunGetData = {
+  body?: never
+  path: {
+    runID: string
+  }
+  query?: never
+  url: "/api/team/run/{runID}"
+}
+
+export type V2TeamRunGetErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * TeamRunNotFound
+   */
+  500: TeamRunNotFound
+}
+
+export type V2TeamRunGetError = V2TeamRunGetErrors[keyof V2TeamRunGetErrors]
+
+export type V2TeamRunGetResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: TeamRunInfo
+  }
+}
+
+export type V2TeamRunGetResponse = V2TeamRunGetResponses[keyof V2TeamRunGetResponses]
+
+export type V2TeamTaskListData = {
+  body?: never
+  path: {
+    runID: string
+  }
+  query?: never
+  url: "/api/team/run/{runID}/task"
+}
+
+export type V2TeamTaskListErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * TeamRunNotFound
+   */
+  500: TeamRunNotFound
+}
+
+export type V2TeamTaskListError = V2TeamTaskListErrors[keyof V2TeamTaskListErrors]
+
+export type V2TeamTaskListResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: Array<TeamTaskInfo>
+  }
+}
+
+export type V2TeamTaskListResponse = V2TeamTaskListResponses[keyof V2TeamTaskListResponses]
+
+export type V2TeamTaskGetData = {
+  body?: never
+  path: {
+    runID: string
+    taskID: string
+  }
+  query?: never
+  url: "/api/team/run/{runID}/task/{taskID}"
+}
+
+export type V2TeamTaskGetErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * TeamTaskNotFound
+   */
+  500: TeamTaskNotFound
+}
+
+export type V2TeamTaskGetError = V2TeamTaskGetErrors[keyof V2TeamTaskGetErrors]
+
+export type V2TeamTaskGetResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: TeamTaskInfo
+  }
+}
+
+export type V2TeamTaskGetResponse = V2TeamTaskGetResponses[keyof V2TeamTaskGetResponses]
+
+export type V2TeamRunCancelData = {
+  body?: never
+  path: {
+    runID: string
+  }
+  query?: never
+  url: "/api/team/run/{runID}/cancel"
+}
+
+export type V2TeamRunCancelErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * TeamRunNotFound
+   */
+  500: TeamRunNotFound
+}
+
+export type V2TeamRunCancelError = V2TeamRunCancelErrors[keyof V2TeamRunCancelErrors]
+
+export type V2TeamRunCancelResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: {
+      success: boolean
+    }
+  }
+}
+
+export type V2TeamRunCancelResponse = V2TeamRunCancelResponses[keyof V2TeamRunCancelResponses]
 
 export type SyncStartData = {
   body?: never

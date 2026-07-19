@@ -1,12 +1,11 @@
 import { Team } from "@opencode-ai/core/schema"
-import { Session } from "@opencode-ai/core/schema"
 import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
-import { Api } from "../api"
-import { TeamGroup, TeamRunNotFoundError, TeamTaskNotFoundError } from "@opencode-ai/protocol/groups/team"
+import { InstanceHttpApi } from "../api"
+import { TeamRunNotFoundError, TeamTaskNotFoundError } from "@opencode-ai/protocol/groups/team"
 import { TeamService } from "@opencode-ai/core/team"
 
-export const TeamHandler = HttpApiBuilder.group(Api, "server.team", (handlers) =>
+export const teamHandlers = HttpApiBuilder.group(InstanceHttpApi, "server.team", (handlers) =>
   Effect.gen(function* () {
     const team = yield* TeamService.Service
 

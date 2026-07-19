@@ -72,12 +72,25 @@ export const TeamGroup = HttpApiGroup.make("server.team")
     HttpApiEndpoint.get("team.getTask", "/api/team/run/:runID/task/:taskID", {
       params: { runID: Team.RunID, taskID: Team.TaskID },
       success: Schema.Struct({ data: Team.TaskInfo }),
-      error: [TeamRunNotFoundError, TeamTaskNotFoundError],
+      error: TeamTaskNotFoundError,
     }).annotateMerge(
       OpenApi.annotations({
         identifier: "v2.team.task.get",
-        summary: "Get task",
-        description: "Retrieve details of a specific task.",
+        summary: "Get team task",
+        description: "Retrieve a specific team task within a run.",
+      }),
+    ),
+  )
+  .add(
+    HttpApiEndpoint.post("team.cancelRun", "/api/team/run/:runID/cancel", {
+      params: { runID: Team.RunID },
+      success: Schema.Struct({ data: Schema.Struct({ success: Schema.Boolean }) }),
+      error: TeamRunNotFoundError,
+    }).annotateMerge(
+      OpenApi.annotations({
+        identifier: "v2.team.run.cancel",
+        summary: "Cancel team run",
+        description: "Cancel an active team run and its running tasks.",
       }),
     ),
   )

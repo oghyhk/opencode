@@ -28,7 +28,7 @@ export function TeamRunView(props: { sessionID: string }) {
     const runID = selectedRunID()
     if (!runID) return
     try {
-      const res = await (sdk.client as any).team.listTasks({ runID })
+      const res = await (sdk.client as any).team.listTasks({ path: { runID } })
       if (res.data) {
         setTasks(res.data)
       }
@@ -49,7 +49,7 @@ export function TeamRunView(props: { sessionID: string }) {
 
   const cancelRun = async (runID: string) => {
     try {
-      await (sdk.client as any).team.cancelRun({ runID })
+      await (sdk.client as any).team.cancelRun({ path: { runID } })
       toast.show({ variant: "success", message: "Team run cancelled successfully." })
       fetchRuns()
       fetchTasks()

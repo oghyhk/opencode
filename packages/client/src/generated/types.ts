@@ -1829,6 +1829,8 @@ export type ServerTeamListTasksOutput = {
     readonly provider?: string
     readonly model?: string
     readonly contextLimit?: number
+    readonly leaseOwner?: string
+    readonly leaseExpiresAt?: number
     readonly timeCreated: number
     readonly timeUpdated: number
   }>
@@ -1865,10 +1867,16 @@ export type ServerTeamGetTaskOutput = {
     readonly provider?: string
     readonly model?: string
     readonly contextLimit?: number
+    readonly leaseOwner?: string
+    readonly leaseExpiresAt?: number
     readonly timeCreated: number
     readonly timeUpdated: number
   }
 }["data"]
+
+export type ServerTeamCancelRunInput = { readonly runID: { readonly runID: string }["runID"] }
+
+export type ServerTeamCancelRunOutput = { readonly data: { readonly success: boolean } }["data"]
 
 export type MessagesListInput = {
   readonly sessionID: { readonly sessionID: string }["sessionID"]
