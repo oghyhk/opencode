@@ -55,6 +55,7 @@ import {
 import { setSessionHandoff } from "@/pages/session/handoff"
 import { useSessionLayout } from "@/pages/session/session-layout"
 import { SessionFileBrowserTab, type SessionFileBrowserState } from "@/pages/session/v2/session-file-browser-tab"
+import { TeamRunView } from "./team-run-view"
 
 type RenderDiff = (SnapshotFileDiff & { file: string }) | VcsFileDiff
 
@@ -178,6 +179,7 @@ export function SessionSidePanel(props: {
     fileBrowser: () => !!props.fileBrowserState,
   })
   const contextOpen = tabState.contextOpen
+  const teamOpen = tabState.teamOpen
   const openFileOpen = tabState.openFileOpen
   const panelTabs = tabState.panelTabs
   const openedTabs = tabState.openedTabs
@@ -359,6 +361,33 @@ export function SessionSidePanel(props: {
                                   </div>
                                 </Tabs.Trigger>
                               </Show>
+                              <Show when={teamOpen()}>
+                                <Tabs.Trigger
+                                  value="team"
+                                  closeButton={
+                                    <TooltipKeybind
+                                      title={language.t("common.closeTab")}
+                                      keybind={command.keybind("tab.close")}
+                                      placement="bottom"
+                                    >
+                                      <IconButton
+                                        icon="close-small"
+                                        variant="ghost"
+                                        class="h-5 w-5"
+                                        onClick={() => tabs().close("team")}
+                                        aria-label={language.t("common.closeTab")}
+                                      />
+                                    </TooltipKeybind>
+                                  }
+                                  hideCloseButton
+                                  onMiddleClick={() => tabs().close("team")}
+                                >
+                                  <div class="flex items-center gap-2">
+                                    <Icon name="subagent" size="small" />
+                                    <div>Team Run</div>
+                                  </div>
+                                </Tabs.Trigger>
+                              </Show>
                               <Show when={contextOpen()}>
                                 <Tabs.Trigger
                                   value="context"
@@ -486,7 +515,15 @@ export function SessionSidePanel(props: {
                             </Tabs.Content>
                           </Show>
 
-                          <Show when={activeTab() === "context"}>
+                            <Show when={activeTab() === "team"}>
+                              <Tabs.Content value="team" class="flex flex-col h-full overflow-hidden contain-strict">
+                                <div class="relative pt-2 flex-1 min-h-0 overflow-hidden">
+                                  <TeamRunView />
+                                </div>
+                              </Tabs.Content>
+                            </Show>
+
+                            <Show when={activeTab() === "context"}>
                             <Tabs.Content value="context" class="flex flex-col h-full overflow-hidden contain-strict">
                               <div class="relative pt-2 flex-1 min-h-0 overflow-hidden">
                                 <SessionContextTab />
