@@ -87,9 +87,13 @@ export function startOAuthListener(options: { port: number; path: string; timeou
           }),
       })
     })
-    server!.on("error", (err) => {
+    server!.on("error", (err: NodeJS.ErrnoException) => {
       cleanup()
-      reject(err)
+      if (err.code === "EADDRINUSE") {
+        reject(new Error(`Port ${options.port} is already in use. Another process is occupying this port. Please terminate the process and try again.`))
+      } else {
+        reject(err)
+      }
     })
   })
 }

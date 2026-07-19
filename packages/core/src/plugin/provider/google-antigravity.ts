@@ -22,7 +22,7 @@ const redirectURI = "http://localhost:51121/oauth-callback"
 
 const Token = Schema.Struct({
   access_token: Schema.String,
-  refresh_token: Schema.String,
+  refresh_token: Schema.String.pipe(Schema.optional),
   expires_in: Schema.Number,
 })
 
@@ -61,12 +61,13 @@ function oauth() {
 
         const listener = (yield* Effect.promise(() => startOAuthListener({ port: 51121, path: "/oauth-callback", timeoutMs: 5 * 60 * 1000 }))) as any
 
-        return {
-          mode: "code" as const,
-          url: url.toString(),
-          instructions: "Sign in using Google Antigravity in the browser window",
-          callback: (code: string) =>
-            Effect.gen(function* () {
+          return {
+            mode: "auto" as const,
+            url: url.toString(),
+            instructions: "Sign in using Google Antigravity in the browser window",
+            callback: Effect.gen(function* () {
+              const callbackResult = (yield* Effect.promise(() => listener.waitForCallback())) as any
+              const code = callbackResult.code
               const res = yield* Effect.promise(() =>
                 fetch("https://oauth2.googleapis.com/token", {
                   method: "POST",
@@ -98,18 +99,52 @@ function oauth() {
                 ? yield* Schema.decodeUnknownEffect(UserInfo)(yield* Effect.promise(() => userRes.json()))
                 : { email: undefined }
 
+              // Fetch project ID
+              let projectId: string | undefined = undefined
+              try {
+                const projectRes = yield* Effect.promise(() =>
+                  fetch("https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist", {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json",
+                      Authorization: `Bearer ${token.access_token}`,
+                      "User-Agent": "google-api-nodejs-client/9.15.1",
+                      "X-Goog-Api-Client": "google-cloud-sdk vscode_cloudshelleditor/0.1",
+                    },
+                    body: JSON.stringify({
+                      metadata: {
+                        ideType: "ANTIGRAVITY",
+                        platform: process.platform === "win32" ? "WINDOWS" : "MACOS",
+                        pluginType: "GEMINI",
+                      },
+                    }),
+                  }),
+                )
+                if (projectRes.ok) {
+                  const payload = (yield* Effect.promise(() => projectRes.json())) as any
+                  if (typeof payload?.cloudaicompanionProject === "string") {
+                    projectId = payload.cloudaicompanionProject
+                  } else if (typeof payload?.cloudaicompanionProject?.id === "string") {
+                    projectId = payload.cloudaicompanionProject.id
+                  }
+                }
+              } catch (err) {
+                console.error("Failed to load managed project from Antigravity", err)
+              }
+
               return Credential.OAuth.make({
                 type: "oauth" as const,
                 methodID,
                 access: token.access_token,
-                refresh: token.refresh_token,
+                refresh: token.refresh_token ?? "", // Should not be empty on initial grant
                 expires: Date.now() + token.expires_in * 1000,
                 metadata: {
                   email: userInfo.email,
+                  projectId,
                 },
               })
             }).pipe(Effect.ensuring(Effect.promise(() => listener.close()))),
-        }
+          }
       }),
     refresh: (credential: Credential.OAuth) =>
       Effect.gen(function* () {
@@ -134,7 +169,7 @@ function oauth() {
         return {
           ...credential,
           access: token.access_token,
-          refresh: token.refresh_token,
+          refresh: token.refresh_token ?? credential.refresh,
           expires: Date.now() + token.expires_in * 1000,
         }
       }),
