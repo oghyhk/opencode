@@ -191,7 +191,7 @@ Teams may later support named worker pools (for example `frontend`, `backend`, a
 
 - [ ] **Exit criterion:** an operator can understand why a run is waiting, which task changed which files, which effective model/context policy applies, and whether the final result is verified without reading every transcript.
 
-### [ ] Phase 7 — Native Antigravity authentication, model catalog, and provider support
+### [x] Phase 7 — Native Antigravity authentication, model catalog, and provider support
 
 **Active phase.** This is the next work to execute.
 
@@ -251,31 +251,32 @@ The current `customFetch` in `google-antigravity.ts` hardcodes `model: "gemini-3
 
 The existing OAuth flow in `google-antigravity.ts` is mostly functional. The following items need verification and hardening:
 
-- [ ] Verify the OAuth callback listener (`oauth/callback.ts`) handles port conflicts gracefully — if port 51121 is in use, surface an actionable error rather than crashing silently.
-- [ ] Verify the callback listener shuts down cleanly on timeout (current: 5 minutes) and on successful code exchange.
-- [ ] Implement token refresh flow — the current `refresh` function in `google-antigravity.ts` (lines 114-141) handles refresh token exchange. Verify it works correctly when the access token expires (60-second buffer like the plugin uses in `accessTokenExpired`).
-- [ ] Store the project ID in credential metadata alongside the email. The project ID is needed for the request envelope.
-- [ ] Verify credentials persist across OpenCode restarts via the existing `Credential.OAuth` storage mechanism.
-- [ ] Redact access/refresh tokens from logs and TUI event streams. Never display tokens in debug output.
+- [x] Verify the OAuth callback listener (`oauth/callback.ts`) handles port conflicts gracefully — if port 51121 is in use, surface an actionable error rather than crashing silently.
+- [x] Verify the callback listener shuts down cleanly on timeout (current: 5 minutes) and on successful code exchange.
+- [x] Implement token refresh flow — the current `refresh` function in `google-antigravity.ts` (lines 114-141) handles refresh token exchange. Verify it works correctly when the access token expires (60-second buffer like the plugin uses in `accessTokenExpired`).
+- [x] Store the project ID in credential metadata alongside the email. The project ID is needed for the request envelope.
+- [x] Verify credentials persist across OpenCode restarts via the existing `Credential.OAuth` storage mechanism.
+- [x] Redact access/refresh tokens from logs and TUI event streams. Never display tokens in debug output.
 
-- [ ] **Exit criterion:** a user can authenticate, restart OpenCode, and continue using the same credentials without re-authenticating; expired tokens are refreshed transparently.
+- [x] **Exit criterion:** a user can authenticate, restart OpenCode, and continue using the same credentials without re-authenticating; expired tokens are refreshed transparently.
 
 #### 7.4 — Thought signature recovery and `finish_reason: "stop"` handling
 
-- [ ] Implement thought signature handling for multi-turn conversations. The plugin's `thinking-recovery.ts` and `stores/signature-store.ts` manage thought signatures that must be re-injected on subsequent turns. Evaluate whether this complexity is needed for the native provider or if the AI SDK handles it.
-- [ ] Handle `finish_reason: "stop"` correctly: a valid final bare-text stop must finish normally. Only an explicitly detected incomplete tool workflow (tool call issued but no tool result returned) should trigger continuation. Do not use a blanket "ignore stop" loop.
-- [ ] For Flash models, verify that the AI SDK's streaming response correctly surfaces thinking content when `includeThoughts: true` is set in the `thinkingConfig`.
+- [x] Implement thought signature handling for multi-turn conversations. The AI SDK (`@ai-sdk/google` v3) natively maps `thoughtSignature` from responses into message history and pushes it back as `providerMetadata.google.thoughtSignature` in subsequent requests. A custom `SignatureStore` is not needed. Unwrapping the Antigravity `response` and translating Claude's `type: "thinking"` to `thought: true` seamlessly leverages this native behavior.
+- [x] Handle `finish_reason: "stop"` correctly: The AI SDK natively intercepts `finishReason: "STOP"` and maps it to `"tool-calls"` if tool calls were issued, meaning incomplete tool loops no longer silently crash.
+- [x] For Flash models, verify that the AI SDK's streaming response correctly surfaces thinking content when `includeThoughts: true` is set in the `thinkingConfig`.
+- [x] Inject Claude-specific tool pairing `id` attributes matching `functionCall` to `functionResponse` before the payload hits Antigravity, as Anthropic models require explicit IDs not native to the Gemini `functionResponse` format.
 
-- [ ] **Exit criterion:** multi-turn tool-using conversations complete correctly; thinking content is visible in the TUI; legitimate completions are not blocked by false-positive continuation logic.
+- [x] **Exit criterion:** multi-turn tool-using conversations complete correctly; thinking content is visible in the TUI; legitimate completions are not blocked by false-positive continuation logic.
 
 #### 7.5 — Compatibility and migration
 
-- [ ] Add a startup compatibility notice that detects the external `@zeklop/opencode-antigravity-auth` plugin declaration in the user's config and explains that native support is now built-in. Do not rewrite the user's config automatically.
-- [ ] Detect hand-authored Antigravity model entries in `provider.google.models` (e.g., `antigravity-gemini-3.1-pro-high` workaround from NOTES.md entry 1.3) and inform the user they are no longer needed.
-- [ ] Ensure the native provider works with no external plugin declaration and no hand-authored model entries. The fork must be fully functional with only the built-in catalog.
-- [ ] Document the migration steps: remove the plugin declaration, remove custom model entries, select the native `google-antigravity` provider in the TUI.
+- [x] Add a startup compatibility notice that detects the external `@zeklop/opencode-antigravity-auth` plugin declaration in the user's config and explains that native support is now built-in. Do not rewrite the user's config automatically.
+- [x] Detect hand-authored Antigravity model entries in `provider.google.models` (e.g., `antigravity-gemini-3.1-pro-high` workaround from NOTES.md entry 1.3) and inform the user they are no longer needed.
+- [x] Ensure the native provider works with no external plugin declaration and no hand-authored model entries. The fork must be fully functional with only the built-in catalog.
+- [x] Document the migration steps: remove the plugin declaration, remove custom model entries, select the native `google-antigravity` provider in the TUI.
 
-- [ ] **Exit criterion:** a fresh TUI user can authenticate, select any native Antigravity model, choose a reasoning effort level, run a multi-turn tool-using task, restart OpenCode, and refresh credentials — all without an external plugin, custom model entries, or configuration workarounds.
+- [x] **Exit criterion:** a fresh TUI user can authenticate, select any native Antigravity model, choose a reasoning effort level, run a multi-turn tool-using task, restart OpenCode, and refresh credentials — all without an external plugin, custom model entries, or configuration workarounds.
 
 ### [ ] Phase 8 — Compatibility, performance, and release
 

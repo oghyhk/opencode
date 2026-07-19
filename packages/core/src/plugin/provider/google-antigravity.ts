@@ -471,6 +471,49 @@ export const GoogleAntigravityPlugin = define({
             if (parsed.generationConfig?.thinkingConfig) delete parsed.generationConfig.thinkingConfig
           }
 
+          // Apply tool pairing fixes for Claude models (required because Gemini format lacks tool call IDs)
+          if (lowerModel.includes("claude") && Array.isArray(parsed.contents)) {
+            const pendingCallIdsByName = new Map<string, string[]>()
+            // First pass: assign IDs to function calls
+            parsed.contents = parsed.contents.map((content: any) => {
+              if (!content || !Array.isArray(content.parts)) return content
+              const newParts = content.parts.map((part: any) => {
+                if (part?.functionCall && typeof part.functionCall.name === "string") {
+                  const call = { ...part.functionCall }
+                  if (!call.id) {
+                    call.id = `call_${crypto.randomUUID()}`
+                  }
+                  const queue = pendingCallIdsByName.get(call.name) || []
+                  queue.push(call.id)
+                  pendingCallIdsByName.set(call.name, queue)
+                  return { ...part, functionCall: call }
+                }
+                return part
+              })
+              return { ...content, parts: newParts }
+            })
+
+            // Second pass: match function responses to calls
+            parsed.contents = parsed.contents.map((content: any) => {
+              if (!content || !Array.isArray(content.parts)) return content
+              const newParts = content.parts.map((part: any) => {
+                if (part?.functionResponse && typeof part.functionResponse.name === "string") {
+                  const resp = { ...part.functionResponse }
+                  if (!resp.id) {
+                    const queue = pendingCallIdsByName.get(resp.name)
+                    if (queue && queue.length > 0) {
+                      resp.id = queue.shift()
+                      pendingCallIdsByName.set(resp.name, queue)
+                    }
+                  }
+                  return { ...part, functionResponse: resp }
+                }
+                return part
+              })
+              return { ...content, parts: newParts }
+            })
+          }
+
           // TODO: project ID resolution from the authenticated account context is needed (7.3 scope)
           const projectId = (credential?.metadata as any)?.projectId || "rising-fact-p41fc"
 
@@ -483,11 +526,169 @@ export const GoogleAntigravityPlugin = define({
             requestId: `agent-${crypto.randomUUID()}`
           }
 
-          return fetch("https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse", {
+          const response = await fetch("https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse", {
             method: "POST",
             headers: initHeaders,
             body: JSON.stringify(envelope),
           })
+
+          if (!response.ok) return response
+
+          const contentType = response.headers.get("content-type") ?? ""
+          const isEventStream = contentType.includes("text/event-stream")
+
+          if (isEventStream && response.body) {
+            const encoder = new TextEncoder()
+            const decoder = new TextDecoder()
+            let buffer = ""
+
+            const transformStream = new TransformStream({
+              transform(chunk, controller) {
+                buffer += decoder.decode(chunk, { stream: true })
+                const lines = buffer.split("\n")
+                buffer = lines.pop() ?? ""
+
+                for (const line of lines) {
+                  if (!line.startsWith("data:")) {
+                    controller.enqueue(encoder.encode(line + "\n"))
+                    continue
+                  }
+
+                  const jsonStr = line.slice(5).trim()
+                  if (!jsonStr) {
+                    controller.enqueue(encoder.encode(line + "\n"))
+                    continue
+                  }
+
+                  try {
+                    const parsedData = JSON.parse(jsonStr)
+                    if (parsedData.response !== undefined) {
+                      let innerResponse = parsedData.response
+                      
+                      // Transform Claude's type: "thinking" blocks to Gemini's thought: true format
+                      if (lowerModel.includes("claude") && innerResponse && typeof innerResponse === "object") {
+                        if (Array.isArray(innerResponse.candidates)) {
+                          innerResponse.candidates = innerResponse.candidates.map((candidate: any) => {
+                            if (!candidate?.content || !Array.isArray(candidate.content.parts)) return candidate
+                            candidate.content.parts = candidate.content.parts.map((part: any) => {
+                              if (part?.type === "thinking" || part?.type === "redacted_thinking") {
+                                const transformed: any = {
+                                  text: part.thinking || part.text || "",
+                                  thought: true,
+                                }
+                                const sig = part.signature || part.thoughtSignature
+                                if (sig) transformed.thoughtSignature = sig
+                                return transformed
+                              }
+                              return part
+                            })
+                            return candidate
+                          })
+                        }
+                      }
+                      
+                      controller.enqueue(encoder.encode(`data: ${JSON.stringify(innerResponse)}\n`))
+                    } else {
+                      controller.enqueue(encoder.encode(line + "\n"))
+                    }
+                  } catch (e) {
+                    controller.enqueue(encoder.encode(line + "\n"))
+                  }
+                }
+              },
+              flush(controller) {
+                buffer += decoder.decode()
+                if (buffer) {
+                  try {
+                    if (buffer.startsWith("data:")) {
+                      const jsonStr = buffer.slice(5).trim()
+                      if (jsonStr) {
+                        const parsedData = JSON.parse(jsonStr)
+                        if (parsedData.response !== undefined) {
+                          // Note: flush chunk is usually empty or just end-of-stream, 
+                          // but apply transform just in case
+                          let innerResponse = parsedData.response
+                          if (lowerModel.includes("claude") && innerResponse && typeof innerResponse === "object") {
+                            if (Array.isArray(innerResponse.candidates)) {
+                              innerResponse.candidates = innerResponse.candidates.map((candidate: any) => {
+                                if (!candidate?.content || !Array.isArray(candidate.content.parts)) return candidate
+                                candidate.content.parts = candidate.content.parts.map((part: any) => {
+                                  if (part?.type === "thinking" || part?.type === "redacted_thinking") {
+                                    const transformed: any = {
+                                      text: part.thinking || part.text || "",
+                                      thought: true,
+                                    }
+                                    const sig = part.signature || part.thoughtSignature
+                                    if (sig) transformed.thoughtSignature = sig
+                                    return transformed
+                                  }
+                                  return part
+                                })
+                                return candidate
+                              })
+                            }
+                          }
+                          controller.enqueue(encoder.encode(`data: ${JSON.stringify(innerResponse)}\n`))
+                          return
+                        }
+                      }
+                    }
+                  } catch (e) {}
+                  controller.enqueue(encoder.encode(buffer + "\n"))
+                }
+              }
+            })
+
+            return new Response(response.body.pipeThrough(transformStream), {
+              status: response.status,
+              statusText: response.statusText,
+              headers: response.headers,
+            })
+          }
+
+          if (contentType.includes("application/json")) {
+            const text = await response.text()
+            try {
+              const parsedData = JSON.parse(text)
+              if (parsedData.response !== undefined) {
+                let innerResponse = parsedData.response
+                if (lowerModel.includes("claude") && innerResponse && typeof innerResponse === "object") {
+                  if (Array.isArray(innerResponse.candidates)) {
+                    innerResponse.candidates = innerResponse.candidates.map((candidate: any) => {
+                      if (!candidate?.content || !Array.isArray(candidate.content.parts)) return candidate
+                      candidate.content.parts = candidate.content.parts.map((part: any) => {
+                        if (part?.type === "thinking" || part?.type === "redacted_thinking") {
+                          const transformed: any = {
+                            text: part.thinking || part.text || "",
+                            thought: true,
+                          }
+                          const sig = part.signature || part.thoughtSignature
+                          if (sig) transformed.thoughtSignature = sig
+                          return transformed
+                        }
+                        return part
+                      })
+                      return candidate
+                    })
+                  }
+                }
+                return new Response(JSON.stringify(innerResponse), {
+                  status: response.status,
+                  statusText: response.statusText,
+                  headers: response.headers,
+                })
+              }
+            } catch (e) {
+              // Fall through to returning raw text
+            }
+            return new Response(text, {
+              status: response.status,
+              statusText: response.statusText,
+              headers: response.headers,
+            })
+          }
+
+          return response
         }
 
         evt.sdk = mod.createGoogleGenerativeAI({
