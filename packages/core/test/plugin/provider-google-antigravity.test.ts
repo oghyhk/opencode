@@ -141,4 +141,54 @@ describe("GoogleAntigravityPlugin", () => {
       expect(parsed.request.providerOptions).toBeUndefined()
     }),
   )
+
+  it.effect("unwraps Antigravity response envelope and translates Claude thinking blocks", () =>
+    Effect.gen(function* () {
+      const aisdk = yield* AISDK.Service
+      yield* addPlugin()
+
+      const model = ModelV2.Info.make({
+        ...ModelV2.Info.empty(ProviderV2.ID.make("google-antigravity"), ModelV2.ID.make("antigravity-claude-opus-4-6-thinking")),
+        api: { id: ModelV2.ID.make("claude-opus-4-6-thinking"), type: "aisdk", package: "@ai-sdk/google" },
+        request: { headers: {}, body: { apiKey: "test" } }
+      })
+      const language = yield* aisdk.language(model)
+
+      const originalFetch = globalThis.fetch
+      globalThis.fetch = (async (url: any, init: any) => {
+        // Return wrapped response simulating Antigravity endpoint
+        return new Response(JSON.stringify({
+          response: {
+            candidates: [{ 
+              content: { 
+                parts: [
+                  { type: "thinking", thinking: "I am thinking", signature: "sig123" },
+                  { text: "Here is the answer" }
+                ] 
+              } 
+            }]
+          }
+        }), { status: 200, headers: { "Content-Type": "application/json" } })
+      }) as any
+
+      try {
+        const response = yield* Effect.promise(() => language.doGenerate({
+          inputFormat: "prompt-update",
+          mode: "regular",
+          prompt: [{ role: "user", content: [{ type: "text", text: "hi" }] }]
+        } as any))
+
+        // Verify the response is correctly unwrapped and parsed by the AI SDK
+        const content = response.content as any[]
+        expect(content[0].type).toBe("reasoning")
+        expect(content[0].text).toBe("I am thinking")
+        expect(content[0].providerMetadata.google.thoughtSignature).toBe("sig123")
+        
+        expect(content[1].type).toBe("text")
+        expect(content[1].text).toBe("Here is the answer")
+      } finally {
+        globalThis.fetch = originalFetch
+      }
+    }),
+  )
 })

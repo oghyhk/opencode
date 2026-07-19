@@ -71,6 +71,12 @@ export const Plugin = define({
       }
 
       for (const ref of configured) {
+        if (ref.package === "@zeklop/opencode-antigravity-auth") {
+          yield* Effect.logWarning(
+            `\n\n[Migration Notice] The external plugin "@zeklop/opencode-antigravity-auth" is no longer needed. OpenCode now natively supports Google Antigravity. Please remove this plugin from your opencode.json configuration to prevent conflicts.\n\n`
+          )
+        }
+
         yield* Effect.gen(function* () {
           const entrypoint = path.isAbsolute(ref.package)
             ? pathToFileURL(ref.package).href

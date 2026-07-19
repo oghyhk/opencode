@@ -59,6 +59,11 @@ export const Plugin = define({
               }
             })
             for (const [id, config] of Object.entries(item.models ?? {})) {
+              if (id.startsWith("antigravity-")) {
+                yield* Effect.logWarning(
+                  `\n\n[Migration Notice] You have a custom model "${id}" defined in your provider configuration. OpenCode now natively supports the complete Google Antigravity catalog with TUI-selectable reasoning variants. Please remove hand-authored Antigravity model entries from your configuration.\n\n`
+                )
+              }
               catalog.model.update(providerID, id, (model) => {
                 if (config.family !== undefined) model.family = config.family
                 if (config.name !== undefined) model.name = config.name
