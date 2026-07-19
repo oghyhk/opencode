@@ -89,7 +89,7 @@ const layer = Layer.effect(
         if (availableSlots === 0) continue
 
         // Extract claimed paths of active running tasks
-        const activeClaimedPaths = runningRows.flatMap((row) => 
+        const activeClaimedPaths = runningRows.flatMap((row) =>
           row.claimed_paths ? (JSON.parse(row.claimed_paths) as string[]) : []
         )
 

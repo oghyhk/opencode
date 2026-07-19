@@ -10,6 +10,8 @@ import {
 } from "@opencode-ai/schema/schema"
 
 export { AbsolutePath, DateTimeUtcFromMillis, NonNegativeInt, optional, PositiveInt, RelativePath, statics }
+export { Team } from "@opencode-ai/schema/team"
+export { Session } from "@opencode-ai/schema/session"
 
 /**
  * Strip `readonly` from a nested type. Stand-in for `effect`'s `Types.DeepMutable`

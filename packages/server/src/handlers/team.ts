@@ -1,5 +1,5 @@
-import { Team } from "@opencode-ai/schema/team"
-import { Session } from "@opencode-ai/schema/session"
+import { Team } from "@opencode-ai/core/schema"
+import { Session } from "@opencode-ai/core/schema"
 import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { Api } from "../api"

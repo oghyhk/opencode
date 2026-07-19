@@ -19,7 +19,7 @@ This specification details the discovery, design, data model, and API/TUI contra
 
 ### 2.1 Behavior Reference (from `opencode-antigravity-auth`)
 - **OAuth Flow**: Standard Google OAuth2 PKCE flow. Needs redirect URI `http://localhost:51121/oauth-callback`. Spins up a local listener on port `51121` to capture authorization code, then exchanges it for a refresh token.
-- **Token Storage**: Credentials must be stored securely using the existing `@opencode-ai/core/src/credential.ts` schema (which includes SQLite credential tables). 
+- **Token Storage**: Credentials must be stored securely using the existing `@opencode-ai/core/src/credential.ts` schema (which includes SQLite credential tables).
 - **Request Wrapping**: Custom Assist API envelope format (`{project, model, request: geminiPayload}`) sent to `cloudcode-pa.googleapis.com`.
 - **Device Fingerprinting**: Randomized user agents and device IDs generated per account.
 - **Thinking Recovery**: Handles thought signature caching and injection across multi-turn tool calling. Resolves tool definitions to prevent invalid parameter names.
@@ -94,11 +94,11 @@ Enforce context limits explicitly during named-team and global overrides configu
 - **TUI Customization Warning**: The local workspace configuration `opencode.json` defines `"tools": { "skill": false }` for both the `build` and `plan` agents. This disables the `skill` tool entirely. When these agents run, they will NOT load or use the `customize-opencode` skill or show it in `<available_skills>`, meaning configuration instructions are omitted. This is a user-level configuration preference; do not alter it without user consent.
 
 ## 7. Session V1 Compatibility vs Session V2 Core
-- **Session V1 Compatibility (`packages/core/src/v1/session.ts` / `packages/schema/src/v1/session.ts`)**: Retained purely for backward compatibility with older database rows, legacy events, and client integrations. 
+- **Session V1 Compatibility (`packages/core/src/v1/session.ts` / `packages/schema/src/v1/session.ts`)**: Retained purely for backward compatibility with older database rows, legacy events, and client integrations.
 - **Session V2 Core (`packages/core/src/session.ts` / `packages/core/src/session/*`)**: The active execution model that owns the TUI loop, message projections, database tables (`session_message`, `session_input`), and system context registry. All new Team Orchestration and scheduling logic must integrate directly with the V2 Core and event stream (`packages/core/src/session/runner/llm.ts`), avoiding old V1 structures.
 
 ## 8. Model Catalog Context Limit Enforcement
-- **Effective Context Limit Resolution**: 
+- **Effective Context Limit Resolution**:
   1. Retrieve `context_limit` from team-task attempt, falling back to team definition, global setting, or the model's catalog maximum.
   2. Validate `64_000 <= context_limit <= model.context_window`.
   3. If the model window is unknown or smaller than 64k, reject request immediately.
