@@ -11,7 +11,7 @@ export interface Listener {
   close(): Promise<void>
 }
 
-export function startOAuthListener(options: { port: number; path: string; timeoutMs?: number }): Promise<Listener> {
+export function startOAuthListener(options: { port: number; path: string; state?: string; timeoutMs?: number }): Promise<Listener> {
   const timeoutMs = options.timeoutMs ?? 5 * 60 * 1000
   let server: ReturnType<typeof createServer> | undefined
 
@@ -50,6 +50,14 @@ export function startOAuthListener(options: { port: number; path: string; timeou
     const state = url.searchParams.get("state")
     const error = url.searchParams.get("error")
     const errorDescription = url.searchParams.get("error_description")
+
+    if (options.state && state !== options.state) {
+      res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" })
+      res.end(OauthCallbackPage.error("State parameter mismatch. Possible CSRF attack detected.", { provider: "Google Antigravity" }))
+      rejectCallback(new Error("State parameter mismatch in OAuth callback"))
+      cleanup()
+      return
+    }
 
     if (error) {
       const errorMsg = errorDescription || error

@@ -25,6 +25,9 @@ const currentActiveCredIdByFamily: Record<string, string | undefined> = {
   gemini: undefined,
 }
 
+const signatureCache = new Map<string, string>()
+const hashText = (text: string) => crypto.createHash("sha256").update(text).digest("hex")
+
 const Token = Schema.Struct({
   access_token: Schema.String,
   refresh_token: Schema.String.pipe(Schema.optional),
@@ -49,6 +52,7 @@ function oauth() {
         // Native PKCE challenge generation
         const verifier = crypto.randomBytes(32).toString("base64url")
         const challenge = crypto.createHash("sha256").update(verifier).digest("base64url")
+        const state = crypto.randomBytes(16).toString("hex")
 
         const url = new URL("https://accounts.google.com/o/oauth2/v2/auth")
         url.searchParams.set("client_id", clientID)
@@ -57,14 +61,11 @@ function oauth() {
         url.searchParams.set("scope", scopes.join(" "))
         url.searchParams.set("code_challenge", challenge)
         url.searchParams.set("code_challenge_method", "S256")
-        url.searchParams.set(
-          "state",
-          Buffer.from(JSON.stringify({ verifier }), "utf8").toString("base64url"),
-        )
+        url.searchParams.set("state", state)
         url.searchParams.set("access_type", "offline")
         url.searchParams.set("prompt", "consent")
 
-        const listener = (yield* Effect.promise(() => startOAuthListener({ port: 51121, path: "/oauth-callback", timeoutMs: 5 * 60 * 1000 }))) as any
+        const listener = (yield* Effect.promise(() => startOAuthListener({ port: 51121, path: "/oauth-callback", state, timeoutMs: 5 * 60 * 1000 }))) as any
 
           return {
             mode: "auto" as const,
@@ -131,6 +132,32 @@ function oauth() {
                     projectId = payload.cloudaicompanionProject
                   } else if (typeof payload?.cloudaicompanionProject?.id === "string") {
                     projectId = payload.cloudaicompanionProject.id
+                  }
+                }
+
+                // If still missing, auto-provision via onboarding
+                if (!projectId) {
+                  const onboardRes = yield* Effect.promise(() =>
+                    fetch("https://cloudcode-pa.googleapis.com/v1internal:onboardUser", {
+                      method: "POST",
+                      headers: {
+                        "Content-Type": "application/json",
+                        Authorization: `Bearer ${token.access_token}`,
+                        "User-Agent": "antigravity/windows/amd64",
+                      },
+                      body: JSON.stringify({
+                        tierId: "FREE",
+                        metadata: {
+                          ideType: "ANTIGRAVITY",
+                          platform: process.platform === "win32" ? "WINDOWS" : "MACOS",
+                          pluginType: "GEMINI",
+                        }
+                      })
+                    })
+                  )
+                  if (onboardRes.ok) {
+                    const onboardData = (yield* Effect.promise(() => onboardRes.json())) as any
+                    projectId = onboardData.response?.cloudaicompanionProject?.id
                   }
                 }
               } catch (err) {
@@ -591,6 +618,34 @@ export const GoogleAntigravityPlugin = define({
                           projectId = payload.cloudaicompanionProject.id
                         }
                       }
+
+                      // If still missing, auto-provision via onboarding
+                      if (!projectId) {
+                        try {
+                          const onboardRes = await fetch("https://cloudcode-pa.googleapis.com/v1internal:onboardUser", {
+                            method: "POST",
+                            headers: {
+                              "Content-Type": "application/json",
+                              Authorization: `Bearer ${token}`,
+                              "User-Agent": "antigravity/windows/amd64",
+                            },
+                            body: JSON.stringify({
+                              tierId: "FREE",
+                              metadata: {
+                                ideType: "ANTIGRAVITY",
+                                platform: process.platform === "win32" ? "WINDOWS" : "MACOS",
+                                pluginType: "GEMINI",
+                              }
+                            })
+                          })
+                          if (onboardRes.ok) {
+                            const onboardData = (await onboardRes.json()) as any
+                            projectId = onboardData.response?.cloudaicompanionProject?.id
+                          }
+                        } catch (err) {
+                          console.error("Failed to onboard managed project:", err)
+                        }
+                      }
                     }
 
                     // Save the refreshed token & details in metadata
@@ -718,6 +773,62 @@ export const GoogleAntigravityPlugin = define({
 
           // Apply model transformations and resolve backend model name
           const resolvedBackendModel = resolveBackendModel(lowerModel, parsed)
+
+          // 1. Thinking Recovery for Claude models (if we are in a tool loop but the turn has no thinking)
+          if (lowerModel.includes("claude") && Array.isArray(parsed.contents) && parsed.contents.length > 0) {
+            const contents = parsed.contents
+            const lastMsg = contents[contents.length - 1]
+            const isToolResponse = lastMsg && lastMsg.role === "user" && Array.isArray(lastMsg.parts) && lastMsg.parts.some((p: any) => p && p.functionResponse)
+
+            if (isToolResponse) {
+              // Find the last assistant message
+              let lastAssistantMsg: any = null
+              for (let i = contents.length - 2; i >= 0; i--) {
+                if (contents[i] && (contents[i].role === "model" || contents[i].role === "assistant")) {
+                  lastAssistantMsg = contents[i]
+                  break
+                }
+              }
+              const hasThinking = lastAssistantMsg && Array.isArray(lastAssistantMsg.parts) && lastAssistantMsg.parts.some((p: any) => p && (p.thought === true || p.type === "reasoning"))
+
+              if (!hasThinking) {
+                // Trigger thinking recovery: close the tool loop
+                const syntheticModel = {
+                  role: "model",
+                  parts: [{ text: "[Tool execution completed.]" }],
+                }
+                const syntheticUser = {
+                  role: "user",
+                  parts: [{ text: "[Continue]" }],
+                }
+                parsed.contents = [...contents, syntheticModel, syntheticUser]
+              }
+            }
+          }
+
+          // 2. Filter unsigned thinking blocks & inject cached signatures for Claude
+          if (lowerModel.includes("claude") && Array.isArray(parsed.contents)) {
+            parsed.contents = parsed.contents.map((content: any) => {
+              if (!content || !Array.isArray(content.parts)) return content
+              const filteredParts = content.parts.filter((part: any) => {
+                if (part && (part.thought === true || part.type === "reasoning")) {
+                  const text = part.text || ""
+                  const sig = part.thoughtSignature || signatureCache.get(hashText(text))
+                  if (sig) {
+                    part.thoughtSignature = sig
+                    return true
+                  }
+                  return false // Strip unsigned thinking block
+                }
+                return true
+              })
+              // Keep at least one dummy part if we stripped everything to avoid empty message
+              if (filteredParts.length === 0 && content.parts.length > 0) {
+                return { ...content, parts: [{ text: "[Thinking]" }] }
+              }
+              return { ...content, parts: filteredParts }
+            })
+          }
 
           // Mutate parsed body in place to match backend expectations
           if (lowerModel.includes("flash")) {
@@ -872,7 +983,10 @@ export const GoogleAntigravityPlugin = define({
                                   thought: true,
                                 }
                                 const sig = part.signature || part.thoughtSignature
-                                if (sig) transformed.thoughtSignature = sig
+                                if (sig) {
+                                  transformed.thoughtSignature = sig
+                                  signatureCache.set(hashText(transformed.text), sig)
+                                }
                                 return transformed
                               }
                               return part
@@ -914,7 +1028,10 @@ export const GoogleAntigravityPlugin = define({
                                       thought: true,
                                     }
                                     const sig = part.signature || part.thoughtSignature
-                                    if (sig) transformed.thoughtSignature = sig
+                                    if (sig) {
+                                      transformed.thoughtSignature = sig
+                                      signatureCache.set(hashText(transformed.text), sig)
+                                    }
                                     return transformed
                                   }
                                   return part
@@ -958,7 +1075,10 @@ export const GoogleAntigravityPlugin = define({
                             thought: true,
                           }
                           const sig = part.signature || part.thoughtSignature
-                          if (sig) transformed.thoughtSignature = sig
+                          if (sig) {
+                            transformed.thoughtSignature = sig
+                            signatureCache.set(hashText(transformed.text), sig)
+                          }
                           return transformed
                         }
                         return part
