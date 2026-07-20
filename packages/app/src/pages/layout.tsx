@@ -38,6 +38,8 @@ import { setV2Toast, showToast, ToastRegion } from "@/utils/toast"
 import { useServerSDK } from "@/context/server-sdk"
 import { clearWorkspaceTerminals } from "@/context/terminal"
 import { pickSessionCacheEvictions } from "@/context/global-sync/session-cache"
+import { dashboardOpen } from "@/context/dashboard"
+import { DashboardOverlay } from "@/components/dashboard-overlay"
 import { useNotification } from "@/context/notification"
 import { usePermission } from "@/context/permission"
 import { Binary } from "@opencode-ai/core/util/binary"
@@ -2249,6 +2251,9 @@ export default function LegacyLayout(props: ParentProps) {
     <div class="relative bg-background-base flex-1 min-h-0 min-w-0 flex flex-col select-none [&_input]:select-text [&_textarea]:select-text [&_[contenteditable]]:select-text">
       {autoselecting() ?? ""}
       <Titlebar update={titlebarUpdate} />
+      <Show when={dashboardOpen()}>
+        <DashboardOverlay />
+      </Show>
       <Show when={updateVersion() !== undefined}>
         <UpdateAvailableToast version={updateVersion() ?? ""} install={installUpdate} language={language} />
       </Show>

@@ -28,6 +28,7 @@ import { tabKey, useTabs } from "@/context/tabs"
 import type { PromptSession } from "@/context/prompt"
 import "./titlebar.css"
 import { newTabTooltipKeybind } from "./command-tooltip-keybind"
+import { dashboardOpen, setDashboardOpen } from "@/context/dashboard"
 
 type TauriDesktopWindow = {
   startDragging?: () => Promise<void>
@@ -590,6 +591,18 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
                     <Icon size="small" name={layout.sidebar.opened() ? "sidebar-active" : "sidebar"} />
                   </Button>
                 </TooltipKeybind>
+                <TooltipV2
+                  placement="bottom"
+                  value="Open Dashboard"
+                >
+                  <Button
+                    variant="ghost"
+                    class="titlebar-icon w-8 h-6 p-0 box-border ml-1"
+                    onClick={() => setDashboardOpen((x) => !x)}
+                  >
+                    <Icon size="small" name={"gauge" as any} />
+                  </Button>
+                </TooltipV2>
                 <div class="hidden xl:flex items-center shrink-0">
                   <Show when={params.dir}>
                     <div
