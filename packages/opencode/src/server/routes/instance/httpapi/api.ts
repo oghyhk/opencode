@@ -22,7 +22,6 @@ import { ProviderApi } from "./groups/provider"
 import { PtyApi, PtyConnectApi } from "./groups/pty"
 import { QuestionApi } from "./groups/question"
 import { SessionApi } from "./groups/session"
-import { TeamGroup } from "@opencode-ai/protocol/groups/team"
 import { SyncApi } from "./groups/sync"
 import { TuiApi } from "./groups/tui"
 import { WorkspaceApi } from "./groups/workspace"
@@ -72,7 +71,6 @@ export const InstanceHttpApi = HttpApi.make("opencode-instance")
   .addHttpApi(PermissionApi)
   .addHttpApi(ProviderApi)
   .addHttpApi(SessionApi)
-  .add(TeamGroup)
   .addHttpApi(SyncApi)
   .addHttpApi(TuiApi)
   .addHttpApi(WorkspaceApi)
