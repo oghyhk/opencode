@@ -1,23 +1,135 @@
-import { For, Show, createSignal, createEffect, onMount } from "solid-js"
+import { For, Show, createSignal, onMount } from "solid-js"
 import { useServerSDK } from "@/context/server-sdk"
 import { setDashboardOpen } from "@/context/dashboard"
 import { Icon } from "@opencode-ai/ui/icon"
 
+// ── Cockpit JSON parser (ported from GPTSession2CPAandSub2API) ──────────────
+function str(val: unknown): string {
+  return typeof val === "string" && val.trim() ? val.trim() : ""
+}
+
+function parseJwtPayload(token: string): Record<string, unknown> | undefined {
+  const parts = token.split(".")
+  if (parts.length < 2) return undefined
+  try {
+    return JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")))
+  } catch {
+    return undefined
+  }
+}
+
+function collectSessionLikeObjects(value: unknown, sourceName = "pasted"): any[] {
+  const found: any[] = []
+  const visited = new WeakSet()
+
+  function visit(item: unknown, path: string) {
+    if (!item || typeof item !== "object") return
+    if (Array.isArray(item)) {
+      item.forEach((child, i) => visit(child, `${path}[${i}]`))
+      return
+    }
+    if (visited.has(item)) return
+    visited.add(item)
+    const obj = item as Record<string, any>
+
+    const token =
+      str(obj.accessToken) || str(obj.access_token) ||
+      str(obj.tokens?.access_token) || str(obj.tokens?.accessToken) ||
+      str(obj.credentials?.access_token)
+
+    const hasIdentity = obj.user || str(obj.email) || str(obj.name) || str(obj.label) ||
+      str(obj.meta?.label) || str(obj.tokens?.account_id) ||
+      str(obj.providerSpecificData?.chatgptAccountId) || str(obj.id)
+
+    if (token && hasIdentity) {
+      found.push({ value: obj, sourceName, path })
+      return
+    }
+
+    for (const [key, child] of Object.entries(obj)) {
+      if (key === "accessToken" || key === "access_token" || key === "sessionToken") continue
+      visit(child, `${path}.${key}`)
+    }
+  }
+
+  visit(value, "$")
+  return found
+}
+
+function convertToCockpitFormat(record: Record<string, any>): {
+  access_token: string
+  refresh_token: string
+  id_token: string
+  email?: string
+  account_id?: string
+  plan?: string
+} | null {
+  const accessToken =
+    str(record.accessToken) || str(record.access_token) ||
+    str(record.tokens?.access_token) || str(record.tokens?.accessToken) ||
+    str(record.credentials?.access_token)
+
+  if (!accessToken) return null
+
+  const refreshToken =
+    str(record.refreshToken) || str(record.refresh_token) ||
+    str(record.tokens?.refresh_token) || str(record.tokens?.refreshToken) ||
+    str(record.credentials?.refresh_token)
+
+  const idToken =
+    str(record.idToken) || str(record.id_token) ||
+    str(record.tokens?.id_token) || str(record.tokens?.idToken) ||
+    str(record.credentials?.id_token)
+
+  const email =
+    str(record.user?.email) || str(record.email) ||
+    str(record.meta?.label) || str(record.label) ||
+    str(record.credentials?.email)
+
+  const accountId =
+    str(record.account?.id) || str(record.account_id) ||
+    str(record.tokens?.account_id) || str(record.chatgpt_account_id) ||
+    str(record.providerSpecificData?.chatgptAccountId)
+
+  // Try to extract from JWT
+  const payload = parseJwtPayload(accessToken)
+  const auth = (payload?.["https://api.openai.com/auth"] || {}) as Record<string, any>
+  const profile = (payload?.["https://api.openai.com/profile"] || {}) as Record<string, any>
+
+  const plan =
+    str(record.account?.planType) || str(record.plan_type) ||
+    str(record.providerSpecificData?.chatgptPlanType) ||
+    str(auth.chatgpt_plan_type)
+
+  return {
+    access_token: accessToken,
+    refresh_token: refreshToken,
+    id_token: idToken,
+    email: email || str(profile.email) || str(payload?.email as string),
+    account_id: accountId || str(auth.chatgpt_account_id),
+    plan,
+  }
+}
+
+// ── Dashboard Component ─────────────────────────────────────────────────────
 export function DashboardOverlay() {
   const sdk = useServerSDK()
-  const [activeTab, setActiveTab] = createSignal<"accounts" | "usage">("accounts")
-  const [creds, setCreds] = createSignal<any[]>([])
+  const [activeTab, setActiveTab] = createSignal<"google" | "codex" | "usage">("google")
+  const [googleCreds, setGoogleCreds] = createSignal<any[]>([])
+  const [codexCreds, setCodexCreds] = createSignal<any[]>([])
   const [position, setPosition] = createSignal({ x: 150, y: 100 })
   const [refreshTokenInput, setRefreshTokenInput] = createSignal("")
-  
+  const [codexImportStatus, setCodexImportStatus] = createSignal("")
   const [timeFilter, setTimeFilter] = createSignal<"1d" | "1w" | "1m" | "all">("all")
-  
+  const [isMigrating, setIsMigrating] = createSignal(false)
+
   let dragStart = { x: 0, y: 0 }
   let isDragging = false
 
   const handlePointerDown = (e: PointerEvent) => {
-    // Only drag from the header bar, not buttons
     if ((e.target as HTMLElement).closest("button")) return
+    if ((e.target as HTMLElement).closest("input")) return
+    if ((e.target as HTMLElement).closest("select")) return
     isDragging = true
     dragStart = { x: e.clientX - position().x, y: e.clientY - position().y }
     document.addEventListener("pointermove", handlePointerMove)
@@ -26,10 +138,7 @@ export function DashboardOverlay() {
 
   const handlePointerMove = (e: PointerEvent) => {
     if (!isDragging) return
-    setPosition({
-      x: e.clientX - dragStart.x,
-      y: e.clientY - dragStart.y
-    })
+    setPosition({ x: e.clientX - dragStart.x, y: e.clientY - dragStart.y })
   }
 
   const handlePointerUp = () => {
@@ -38,38 +147,199 @@ export function DashboardOverlay() {
     document.removeEventListener("pointerup", handlePointerUp)
   }
 
-  const fetchCreds = async () => {
+  const fetchGoogleCreds = async () => {
     try {
       const res = await (sdk().client as any).credential.list({ integrationID: "google-antigravity" })
-      if (res.data) {
-        setCreds(res.data)
-      }
+      if (res.data) setGoogleCreds(res.data)
     } catch (e) {
       console.error(e)
     }
   }
 
+  const fetchCodexCreds = async () => {
+    try {
+      const res = await (sdk().client as any).credential.list({ integrationID: "codex-openai" })
+      if (res.data) setCodexCreds(res.data)
+    } catch (e) {
+      console.error(e)
+    }
+  }
+
+  const fetchAllCreds = () => {
+    fetchGoogleCreds()
+    fetchCodexCreds()
+  }
+
   onMount(() => {
-    fetchCreds()
-    const id = setInterval(fetchCreds, 5000)
+    fetchAllCreds()
+    const id = setInterval(fetchAllCreds, 5000)
     return () => clearInterval(id)
   })
 
+  // ── Google: Add account via refresh token ──
+  const addGoogleAccount = async () => {
+    const token = refreshTokenInput().trim()
+    if (!token) return
+    try {
+      await (sdk().client as any).integrations.connectKey({
+        integrationID: "google-antigravity",
+        label: `Antigravity (${token.substring(0, 8)}...)`,
+        key: token,
+      })
+      setRefreshTokenInput("")
+      fetchGoogleCreds()
+    } catch (e) {
+      console.error("Failed to add Google account", e)
+    }
+  }
+
+  // ── Google: Migrate legacy accounts ──
+  const migrateLegacyAccounts = async () => {
+    setIsMigrating(true)
+    try {
+      const oldCreds = await (sdk().client as any).credential.list({ integrationID: "@zeklop/opencode-antigravity-auth" })
+      if (oldCreds.data && oldCreds.data.length > 0) {
+        for (const cred of oldCreds.data) {
+          if (cred.value?.refreshToken) {
+            await (sdk().client as any).integrations.connectKey({
+              integrationID: "google-antigravity",
+              label: cred.label,
+              key: cred.value.refreshToken,
+            })
+          }
+        }
+        alert(`Migrated ${oldCreds.data.length} accounts!`)
+      } else {
+        const envTokens = (import.meta as any).env?.VITE_MIGRATE_TOKENS
+        if (envTokens) {
+          const userTokens = JSON.parse(envTokens)
+          let count = 0
+          for (const user of userTokens) {
+            const exists = googleCreds().some((c: any) => c.value?.key === user.token || c.value?.metadata?.email === user.email)
+            if (!exists) {
+              await (sdk().client as any).integrations.connectKey({
+                integrationID: "google-antigravity",
+                label: user.email,
+                key: user.token,
+              })
+              count++
+            }
+          }
+          alert(`Imported ${count} accounts from .env.local!`)
+        } else {
+          alert("No legacy accounts found to migrate.")
+        }
+      }
+      fetchGoogleCreds()
+    } catch (e) {
+      console.error("Failed to migrate", e)
+      alert("Migration failed. Check console.")
+    } finally {
+      setIsMigrating(false)
+    }
+  }
+
+  // ── Codex: Import from JSON files (cockpit / 9router / codex auth.json / etc.) ──
+  const importCodexFromFiles = async () => {
+    try {
+      const input = document.createElement("input")
+      input.type = "file"
+      input.accept = ".json,application/json"
+      input.multiple = true
+      input.onchange = async () => {
+        if (!input.files || input.files.length === 0) return
+        setCodexImportStatus("Reading files...")
+
+        let totalImported = 0
+        let totalSkipped = 0
+        const errors: string[] = []
+
+        for (const file of Array.from(input.files)) {
+          try {
+            const text = await file.text()
+            const parsed = JSON.parse(text)
+            const sessions = collectSessionLikeObjects(parsed, file.name)
+
+            if (sessions.length === 0) {
+              errors.push(`${file.name}: No accounts found`)
+              continue
+            }
+
+            for (const session of sessions) {
+              const cockpit = convertToCockpitFormat(session.value)
+              if (!cockpit || !cockpit.refresh_token) {
+                totalSkipped++
+                continue
+              }
+
+              // Check for duplicate
+              const exists = codexCreds().some((c: any) => {
+                const meta = c.value?.metadata || {}
+                return meta.email === cockpit.email || meta.accountId === cockpit.account_id
+              })
+              if (exists) {
+                totalSkipped++
+                continue
+              }
+
+              // Import as codex-openai credential using the refresh token as the key
+              await (sdk().client as any).integrations.connectKey({
+                integrationID: "codex-openai",
+                label: cockpit.email || `Codex (${cockpit.account_id?.substring(0, 8) || "account"}...)`,
+                key: cockpit.refresh_token,
+              })
+              totalImported++
+            }
+          } catch (e) {
+            errors.push(`${file.name}: ${e instanceof Error ? e.message : "Parse error"}`)
+          }
+        }
+
+        setCodexImportStatus(
+          `Imported ${totalImported} account(s)` +
+          (totalSkipped > 0 ? `, skipped ${totalSkipped}` : "") +
+          (errors.length > 0 ? `. Errors: ${errors.join("; ")}` : ""),
+        )
+        fetchCodexCreds()
+        setTimeout(() => setCodexImportStatus(""), 8000)
+      }
+      input.click()
+    } catch (e) {
+      console.error("File import failed", e)
+      setCodexImportStatus("File import failed")
+    }
+  }
+
+  // ── Codex: Remove account ──
+  const removeCodexAccount = async (id: string) => {
+    try {
+      await (sdk().client as any).credential.remove({ id })
+      fetchCodexCreds()
+    } catch (e) {
+      console.error("Failed to remove Codex account", e)
+    }
+  }
+
+  // ── Usage stats (combines both Google and Codex) ──
   const usageStats = () => {
     let totalInput = 0
     let totalOutput = 0
     let totalCache = 0
-    
-    const cutoff = Date.now() - (
-      timeFilter() === "1d" ? 1 * 24 * 60 * 60 * 1000 :
-      timeFilter() === "1w" ? 7 * 24 * 60 * 60 * 1000 :
-      timeFilter() === "1m" ? 30 * 24 * 60 * 60 * 1000 :
-      0
-    )
 
-    const modelTotals: Record<string, { input: number, output: number, cache: number }> = {}
+    const cutoff =
+      Date.now() -
+      (timeFilter() === "1d"
+        ? 86400000
+        : timeFilter() === "1w"
+          ? 604800000
+          : timeFilter() === "1m"
+            ? 2592000000
+            : 0)
 
-    for (const c of creds()) {
+    const modelTotals: Record<string, { input: number; output: number; cache: number }> = {}
+    const allCreds = [...googleCreds(), ...codexCreds()]
+
+    for (const c of allCreds) {
       const history = c.value?.metadata?.usageHistory || []
       for (const h of history) {
         if (timeFilter() !== "all" && h.timestamp < cutoff) continue
@@ -85,279 +355,220 @@ export function DashboardOverlay() {
       }
     }
 
-    // Sort models by total tokens descending
-    const sortedModelTotals = Object.entries(modelTotals).sort((a, b) => {
-      const aTotal = a[1].input + a[1].output + a[1].cache
-      const bTotal = b[1].input + b[1].output + b[1].cache
-      return bTotal - aTotal
-    })
-
-    return { totalInput, totalOutput, totalCache, modelTotals: sortedModelTotals }
+    return {
+      totalInput,
+      totalOutput,
+      totalCache,
+      modelTotals: Object.entries(modelTotals).sort(
+        (a, b) => b[1].input + b[1].output + b[1].cache - (a[1].input + a[1].output + a[1].cache),
+      ),
+    }
   }
 
   const resetUsage = async () => {
     try {
-      for (const c of creds()) {
+      const allCreds = [...googleCreds(), ...codexCreds()]
+      for (const c of allCreds) {
         const meta = c.value?.metadata || {}
         if (meta.usageHistory || meta.usage) {
           const updatedMeta = { ...meta }
           delete updatedMeta.usageHistory
           delete updatedMeta.usage
-          await (sdk().client as any).credential.update({
-            id: c.id,
-            value: { ...c.value, metadata: updatedMeta }
-          })
+          await (sdk().client as any).credential.update({ id: c.id, value: { ...c.value, metadata: updatedMeta } })
         }
       }
-      fetchCreds()
+      fetchAllCreds()
     } catch (e) {
-      console.error("Failed to reset usage statistics:", e)
+      console.error("Failed to reset usage:", e)
     }
   }
 
-  const addAccountFromToken = async () => {
-    const token = refreshTokenInput().trim()
-    if (!token) return
-    try {
-      await (sdk().client as any).integrations.connectKey({
-        integrationID: "google-antigravity",
-        label: `Antigravity (${token.substring(0, 5)}...)`,
-        key: token
-      })
-      setRefreshTokenInput("")
-      fetchCreds()
-    } catch (e) {
-      console.error("Failed to add account via refresh token", e)
-    }
-  }
-
-  const [isMigrating, setIsMigrating] = createSignal(false)
-  const migrateLegacyAccounts = async () => {
-    setIsMigrating(true)
-    try {
-      const oldCreds = await (sdk().client as any).credential.list({ integrationID: "@zeklop/opencode-antigravity-auth" })
-      if (oldCreds.data && oldCreds.data.length > 0) {
-        for (const cred of oldCreds.data) {
-          if (cred.value?.refreshToken) {
-            await (sdk().client as any).integrations.connectKey({
-              integrationID: "google-antigravity",
-              label: cred.label,
-              key: cred.value.refreshToken
-            })
-            await (sdk().client as any).credentials.remove({ credentialID: cred.id })
-          }
-        }
-        alert(`Successfully migrated ${oldCreds.data.length} accounts to the native Antigravity integration!`)
-      } else {
-        // Fallback to importing tokens from packages/app/.env.local if present
-        const envTokens = import.meta.env.VITE_MIGRATE_TOKENS
-        if (envTokens) {
-          try {
-            const userTokens = JSON.parse(envTokens)
-            let count = 0
-            for (const user of userTokens) {
-              const exists = creds().some((c: any) => c.value?.key === user.token || (c.value?.metadata?.email === user.email))
-              if (!exists) {
-                await (sdk().client as any).integrations.connectKey({
-                  integrationID: "google-antigravity",
-                  label: user.email,
-                  key: user.token
-                })
-                count++
-              }
-            }
-            alert(`Successfully imported ${count} accounts from .env.local file!`)
-          } catch (err) {
-            console.error("Failed to parse VITE_MIGRATE_TOKENS", err)
-            alert("VITE_MIGRATE_TOKENS in .env.local is malformed.")
-          }
-        } else {
-          alert("No legacy plugin accounts found to migrate, and no VITE_MIGRATE_TOKENS found in packages/app/.env.local")
-        }
-      }
-      fetchCreds()
-    } catch (e) {
-      console.error("Failed to migrate legacy accounts", e)
-      alert("Failed to migrate accounts. Check the console for details.")
-    } finally {
-      setIsMigrating(false)
-    }
-  }
+  // ── Sidebar tab config ──
+  const tabs = [
+    { id: "google" as const, label: "Google", color: "text-blue-400", bgActive: "bg-blue-500/10 border-blue-500/30" },
+    { id: "codex" as const, label: "Codex", color: "text-emerald-400", bgActive: "bg-emerald-500/10 border-emerald-500/30" },
+    { id: "usage" as const, label: "Usage", color: "text-amber-400", bgActive: "bg-amber-500/10 border-amber-500/30" },
+  ]
 
   return (
-    <div 
-      class="absolute z-50 flex flex-col w-[800px] h-[550px] bg-v2-background-bg-base border border-v2-border-default rounded-lg shadow-2xl overflow-hidden pointer-events-auto"
+    <div
+      class="absolute z-50 flex flex-col w-[880px] h-[600px] rounded-xl shadow-2xl overflow-hidden pointer-events-auto"
       style={{
         left: position().x + "px",
-        top: position().y + "px"
+        top: position().y + "px",
+        background: "linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%)",
+        border: "1px solid rgba(148, 163, 184, 0.15)",
       }}
     >
-      {/* Header bar serving as Drag Handle */}
-      <div 
-        class="flex flex-row justify-between items-center px-4 py-3 bg-v2-background-bg-subtle border-b border-v2-border-default cursor-move select-none shrink-0"
+      {/* ── Header ── */}
+      <div
+        class="flex flex-row justify-between items-center px-5 py-3 cursor-move select-none shrink-0"
+        style={{ background: "rgba(15, 23, 42, 0.8)", "border-bottom": "1px solid rgba(148, 163, 184, 0.1)" }}
         onPointerDown={handlePointerDown}
       >
-        <div class="flex items-center gap-2">
-          <Icon name={"gauge" as any} size="small" class="text-v2-text-primary" />
-          <span class="text-14-bold text-v2-text-primary font-bold">Dashboard</span>
+        <div class="flex items-center gap-3">
+          <div class="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: "linear-gradient(135deg, #3b82f6, #8b5cf6)" }}>
+            <Icon name={"gauge" as any} size="small" class="text-white" />
+          </div>
+          <span class="text-sm font-bold text-white tracking-wide">Dashboard</span>
+          <div class="flex gap-1.5 ml-2">
+            <span class="px-2 py-0.5 text-[10px] font-bold rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/20">
+              {googleCreds().length} Google
+            </span>
+            <span class="px-2 py-0.5 text-[10px] font-bold rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/20">
+              {codexCreds().length} Codex
+            </span>
+          </div>
         </div>
-        <button 
-          class="p-1 hover:bg-v2-background-bg-subtle rounded transition-colors text-v2-text-secondary"
+        <button
+          class="p-1.5 hover:bg-white/10 rounded-lg transition-colors text-slate-400 hover:text-white"
           onClick={() => setDashboardOpen(false)}
         >
           <Icon name="close" size="small" />
         </button>
       </div>
 
-      {/* Main Layout containing Side Navigation and Content */}
+      {/* ── Main Layout ── */}
       <div class="flex flex-row flex-1 min-h-0">
-        
-        {/* Left Side Navigation (Copied style from Cockpits) */}
-        <div class="w-44 border-r border-v2-border-default flex flex-col gap-1 p-2 bg-v2-background-bg-subtle shrink-0">
-          <button 
-            class={"flex items-center gap-2.5 p-2 rounded text-13-medium w-full text-left transition-colors " + (
-              activeTab() === "accounts" 
-                ? "bg-v2-background-bg-subtle text-v2-text-primary border border-v2-border-default" 
-                : "text-v2-text-secondary hover:bg-v2-background-bg-subtle border border-transparent"
+        {/* ── Sidebar ── */}
+        <div class="w-40 flex flex-col gap-1.5 p-3 shrink-0" style={{ background: "rgba(15, 23, 42, 0.6)", "border-right": "1px solid rgba(148, 163, 184, 0.08)" }}>
+          <For each={tabs}>
+            {(tab) => (
+              <button
+                class={
+                  "flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-xs font-semibold w-full text-left transition-all duration-200 border " +
+                  (activeTab() === tab.id
+                    ? tab.bgActive + " " + tab.color
+                    : "text-slate-400 hover:text-slate-200 hover:bg-white/5 border-transparent")
+                }
+                onClick={() => setActiveTab(tab.id)}
+              >
+                <div
+                  class={"w-2 h-2 rounded-full transition-all " + (activeTab() === tab.id ? "scale-100 opacity-100" : "scale-75 opacity-40")}
+                  style={{
+                    background:
+                      tab.id === "google" ? "#3b82f6" : tab.id === "codex" ? "#10b981" : "#f59e0b",
+                  }}
+                />
+                <span>{tab.label}</span>
+              </button>
             )}
-            onClick={() => setActiveTab("accounts")}
-          >
-            <Icon name={"user" as any} size="small" />
-            <span>Accounts</span>
-          </button>
-          
-          <button 
-            class={"flex items-center gap-2.5 p-2 rounded text-13-medium w-full text-left transition-colors " + (
-              activeTab() === "usage" 
-                ? "bg-v2-background-bg-subtle text-v2-text-primary border border-v2-border-default" 
-                : "text-v2-text-secondary hover:bg-v2-background-bg-subtle border border-transparent"
-            )}
-            onClick={() => setActiveTab("usage")}
-          >
-            <Icon name={"subagent" as any} size="small" />
-            <span>Usage</span>
-          </button>
+          </For>
+
+          {/* Stats in sidebar */}
+          <div class="mt-auto pt-3 flex flex-col gap-2" style={{ "border-top": "1px solid rgba(148, 163, 184, 0.08)" }}>
+            <div class="flex flex-col px-2">
+              <span class="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Total Accounts</span>
+              <span class="text-lg font-black text-white">{googleCreds().length + codexCreds().length}</span>
+            </div>
+          </div>
         </div>
 
-        {/* Content Area */}
-        <div class="flex-1 min-w-0 h-full overflow-y-auto p-4 bg-v2-background-bg-base">
-          
-          <Show when={activeTab() === "accounts"}>
+        {/* ── Content ── */}
+        <div class="flex-1 min-w-0 h-full overflow-y-auto p-5" style={{ background: "rgba(15, 23, 42, 0.3)" }}>
+          {/* ═══════════════ GOOGLE TAB ═══════════════ */}
+          <Show when={activeTab() === "google"}>
             <div class="flex flex-col gap-4">
-              <div class="flex flex-row justify-between items-center border-b border-v2-border-default pb-2">
-                <h3 class="text-15-bold font-bold text-v2-text-primary">Antigravity Accounts</h3>
+              {/* Header */}
+              <div class="flex flex-row justify-between items-center pb-3" style={{ "border-bottom": "1px solid rgba(59, 130, 246, 0.2)" }}>
+                <div class="flex items-center gap-2">
+                  <div class="w-3 h-3 rounded-full" style={{ background: "#3b82f6" }} />
+                  <h3 class="text-sm font-bold text-white">Google Antigravity</h3>
+                </div>
                 <button
-                  class="px-3 py-1 bg-green-500 hover:bg-green-600 text-white text-12-medium rounded transition-colors disabled:opacity-50"
+                  class="px-3 py-1.5 text-[11px] font-semibold rounded-lg transition-colors disabled:opacity-40"
+                  style={{ background: "rgba(34, 197, 94, 0.15)", color: "#4ade80", border: "1px solid rgba(34, 197, 94, 0.2)" }}
                   disabled={isMigrating()}
                   onClick={migrateLegacyAccounts}
                 >
-                  {isMigrating() ? "Migrating..." : "Migrate Legacy Plugin Accounts"}
+                  {isMigrating() ? "Migrating..." : "Migrate Legacy"}
                 </button>
               </div>
-              
-              {/* Add Account Section */}
-              <div class="flex flex-col gap-2 p-3 rounded border border-v2-border-default bg-v2-background-bg-subtle">
-                <span class="text-13-medium text-v2-text-primary">Add Account via Refresh Token</span>
+
+              {/* Add Account */}
+              <div class="flex flex-col gap-2 p-3 rounded-lg" style={{ background: "rgba(59, 130, 246, 0.06)", border: "1px solid rgba(59, 130, 246, 0.15)" }}>
+                <span class="text-xs font-semibold text-blue-300">Add via Refresh Token</span>
                 <div class="flex flex-row gap-2">
                   <input
                     type="text"
                     placeholder="1//0xxxxxxxxx..."
                     value={refreshTokenInput()}
                     onInput={(e) => setRefreshTokenInput(e.currentTarget.value)}
-                    class="flex-1 px-3 py-1.5 bg-v2-background-bg-base border border-v2-border-default rounded text-13-regular text-v2-text-primary focus:outline-none focus:border-blue-500"
+                    class="flex-1 px-3 py-2 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    style={{ background: "rgba(15, 23, 42, 0.8)", border: "1px solid rgba(148, 163, 184, 0.15)" }}
                   />
                   <button
-                    class="px-4 py-1.5 bg-blue-500 hover:bg-blue-600 text-white text-13-medium rounded transition-colors disabled:opacity-50"
+                    class="px-4 py-2 text-xs font-bold rounded-lg text-white transition-all disabled:opacity-40 hover:brightness-110"
+                    style={{ background: "linear-gradient(135deg, #3b82f6, #6366f1)" }}
                     disabled={!refreshTokenInput().trim()}
-                    onClick={addAccountFromToken}
+                    onClick={addGoogleAccount}
                   >
                     Add
                   </button>
                 </div>
               </div>
 
-              <Show when={creds().length > 0} fallback={
-                <div class="text-12-regular text-v2-text-tertiary mt-2">No Antigravity accounts configured yet.</div>
-              }>
+              {/* Account Cards */}
+              <Show
+                when={googleCreds().length > 0}
+                fallback={
+                  <div class="text-xs text-slate-500 mt-2 text-center py-8">No Google Antigravity accounts configured yet.</div>
+                }
+              >
                 <div class="flex flex-col gap-3">
-                  <For each={creds()}>
+                  <For each={googleCreds()}>
                     {(cred) => {
                       const meta = (cred.value?.metadata || {}) as any
                       const quota = meta.cachedQuota || {}
 
                       return (
-                        <div class="flex flex-col p-3 rounded border border-v2-border-default bg-v2-background-bg-subtle gap-2">
+                        <div class="flex flex-col p-3 rounded-lg gap-2.5" style={{ background: "rgba(30, 27, 75, 0.4)", border: "1px solid rgba(99, 102, 241, 0.15)" }}>
                           <div class="flex flex-row justify-between items-center">
                             <div class="flex flex-col">
-                              <span class="text-13-bold font-bold text-v2-text-primary">{meta.email || cred.label}</span>
-                              <span class="text-11-regular text-v2-text-tertiary">Project ID: {meta.projectId || "rising-fact-p41fc"}</span>
+                              <span class="text-xs font-bold text-white">{meta.email || cred.label}</span>
+                              <span class="text-[10px] text-slate-500">Project: {meta.projectId || "auto"}</span>
                             </div>
-                            <div class="flex items-center gap-2">
+                            <div class="flex items-center gap-1.5">
                               <Show when={meta.activeForFamily}>
                                 {(family) => (
-                                  <span class="px-2 py-0.5 text-11-medium text-blue-500 bg-blue-500/10 rounded capitalize">
+                                  <span
+                                    class="px-2 py-0.5 text-[10px] font-bold rounded-full capitalize"
+                                    style={{ background: "rgba(99, 102, 241, 0.15)", color: "#818cf8", border: "1px solid rgba(99, 102, 241, 0.2)" }}
+                                  >
                                     Active {family() === "claude" ? "Claude" : "Gemini"}
                                   </span>
                                 )}
                               </Show>
                               <Show when={meta.rateLimitedUntil && Date.now() < meta.rateLimitedUntil}>
-                                <span class="px-2 py-0.5 text-11-medium text-red-500 bg-red-500/10 rounded">Rate Limited</span>
+                                <span class="px-2 py-0.5 text-[10px] font-bold rounded-full" style={{ background: "rgba(239, 68, 68, 0.15)", color: "#f87171" }}>
+                                  Rate Limited
+                                </span>
                               </Show>
-                              <Show when={meta.coolingDownUntil && Date.now() < meta.coolingDownUntil}>
-                                <span class="px-2 py-0.5 text-11-medium text-orange-500 bg-orange-500/10 rounded">Cooling Down</span>
-                              </Show>
-                              <Show when={!meta.rateLimitedUntil && !meta.coolingDownUntil}>
-                                <span class="px-2 py-0.5 text-11-medium text-green-500 bg-green-500/10 rounded">Active</span>
+                              <Show when={!meta.rateLimitedUntil && !(meta.coolingDownUntil && Date.now() < meta.coolingDownUntil)}>
+                                <span class="px-2 py-0.5 text-[10px] font-bold rounded-full" style={{ background: "rgba(34, 197, 94, 0.15)", color: "#4ade80" }}>
+                                  Active
+                                </span>
                               </Show>
                             </div>
                           </div>
 
-                          {/* Quota Progress Bars */}
-                          <div class="flex flex-col gap-2 mt-1">
+                          {/* Quota bars */}
+                          <div class="flex flex-col gap-1.5">
                             <For each={["claude", "gemini-pro", "gemini-flash"]}>
                               {(group) => {
                                 const groupData = quota[group]
                                 const fraction = groupData?.remainingFraction !== undefined ? groupData.remainingFraction : 1.0
                                 const percent = Math.round(fraction * 100)
-                                const colorClass = percent > 50 ? "bg-green-500" : percent > 20 ? "bg-orange-500" : "bg-red-500"
+                                const barColor = percent > 50 ? "#22c55e" : percent > 20 ? "#f59e0b" : "#ef4444"
 
-  const [isMigrating, setIsMigrating] = createSignal(false)
-  const migrateLegacyAccounts = async () => {
-    setIsMigrating(true)
-    try {
-      const oldCreds = await (sdk().client as any).credential.list({ integrationID: "@zeklop/opencode-antigravity-auth" })
-      if (!oldCreds.data || oldCreds.data.length === 0) {
-        alert("No legacy plugin accounts found to migrate.")
-        setIsMigrating(false)
-        return
-      }
-
-      for (const cred of oldCreds.data) {
-        await (sdk().client as any).credential.create({
-          integrationID: "google-antigravity",
-          label: cred.label,
-          value: cred.value
-        })
-        await (sdk().client as any).credential.delete({ id: cred.id })
-      }
-      alert(`Successfully migrated ${oldCreds.data.length} accounts to the native Antigravity integration!`)
-      fetchCreds()
-    } catch (e) {
-      console.error("Failed to migrate legacy accounts", e)
-      alert("Failed to migrate accounts. Check the console for details.")
-    } finally {
-      setIsMigrating(false)
-    }
-  }
-
-  return (
-                                  <div class="flex flex-col gap-1">
-                                    <div class="flex flex-row justify-between text-11-medium text-v2-text-secondary">
-                                      <span class="capitalize">{group.replace("-", " ")} Quota</span>
-                                      <span>{percent}% Remaining</span>
+                                return (
+                                  <div class="flex flex-col gap-0.5">
+                                    <div class="flex flex-row justify-between text-[10px] text-slate-400">
+                                      <span class="capitalize">{group.replace("-", " ")}</span>
+                                      <span style={{ color: barColor }}>{percent}%</span>
                                     </div>
-                                    <div class="w-full h-1.5 bg-v2-background-bg-base rounded overflow-hidden">
-                                      <div class={"h-full " + colorClass} style={{ width: percent + "%" }} />
+                                    <div class="w-full h-1 rounded-full overflow-hidden" style={{ background: "rgba(148, 163, 184, 0.1)" }}>
+                                      <div class="h-full rounded-full transition-all" style={{ width: percent + "%", background: barColor }} />
                                     </div>
                                   </div>
                                 )
@@ -373,80 +584,254 @@ export function DashboardOverlay() {
             </div>
           </Show>
 
-          <Show when={activeTab() === "usage"}>
+          {/* ═══════════════ CODEX TAB ═══════════════ */}
+          <Show when={activeTab() === "codex"}>
             <div class="flex flex-col gap-4">
-              <div class="flex flex-row justify-between items-center border-b border-v2-border-default pb-2 shrink-0">
-                <div class="flex items-center gap-4">
-                  <h3 class="text-15-bold font-bold text-v2-text-primary">Token Usage Analysis</h3>
-                  <select 
-                    class="bg-v2-background-bg-subtle border border-v2-border-default text-12-medium text-v2-text-primary rounded px-2 py-1 outline-none"
-                    value={timeFilter()}
-                    onChange={(e) => setTimeFilter(e.currentTarget.value as any)}
-                  >
-                    <option value="1d">Recent 1 Day</option>
-                    <option value="1w">Recent 1 Week</option>
-                    <option value="1m">Recent 1 Month</option>
-                    <option value="all">All Time</option>
-                  </select>
+              {/* Header */}
+              <div class="flex flex-row justify-between items-center pb-3" style={{ "border-bottom": "1px solid rgba(16, 185, 129, 0.2)" }}>
+                <div class="flex items-center gap-2">
+                  <div class="w-3 h-3 rounded-full" style={{ background: "#10b981" }} />
+                  <h3 class="text-sm font-bold text-white">Codex (OpenAI)</h3>
                 </div>
-                <button 
-                  class="px-3 py-1 bg-red-500/10 hover:bg-red-500/20 text-12-medium text-red-500 border border-red-500/20 rounded transition-colors"
-                  onClick={resetUsage}
+                <button
+                  class="px-3 py-1.5 text-[11px] font-semibold rounded-lg transition-all hover:brightness-110"
+                  style={{ background: "linear-gradient(135deg, #10b981, #059669)", color: "white" }}
+                  onClick={importCodexFromFiles}
                 >
-                  Reset Stats
+                  + Add Accounts (JSON)
                 </button>
               </div>
 
-              {/* Totals Summary Board */}
-              <div class="grid grid-cols-4 gap-3 shrink-0">
-                <div class="flex flex-col p-3 rounded border border-v2-border-default bg-v2-background-bg-subtle col-span-2">
-                  <span class="text-11-medium text-v2-text-tertiary">TOTAL TOKENS PROCESSED</span>
-                  <span class="text-22-bold font-bold text-v2-text-primary mt-1">
+              {/* Import status */}
+              <Show when={codexImportStatus()}>
+                <div
+                  class="px-3 py-2 rounded-lg text-[11px] font-medium"
+                  style={{ background: "rgba(16, 185, 129, 0.1)", color: "#6ee7b7", border: "1px solid rgba(16, 185, 129, 0.2)" }}
+                >
+                  {codexImportStatus()}
+                </div>
+              </Show>
+
+              {/* Info box */}
+              <div class="p-3 rounded-lg text-[11px] leading-relaxed" style={{ background: "rgba(16, 185, 129, 0.06)", border: "1px solid rgba(16, 185, 129, 0.12)", color: "#94a3b8" }}>
+                <span class="font-bold text-emerald-300">Import from cockpit-tools:</span> Click "Add Accounts" and select one or more JSON files exported from
+                Cockpit Tools, 9router, Codex auth.json, AxonHub, CPA, sub2api, or Codex-Manager.
+                Accounts with a valid <span class="text-emerald-300 font-mono">refresh_token</span> will be imported into the API pool for GPT model access.
+              </div>
+
+              {/* Available GPT models */}
+              <Show when={codexCreds().length > 0}>
+                <div class="p-3 rounded-lg" style={{ background: "rgba(16, 185, 129, 0.04)", border: "1px solid rgba(16, 185, 129, 0.1)" }}>
+                  <span class="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">Available Models</span>
+                  <div class="flex flex-wrap gap-1.5 mt-2">
+                    <For each={["GPT-4.1", "GPT-4.1 Mini", "GPT-4.1 Nano", "o3", "o4-mini", "Codex Mini"]}>
+                      {(model) => (
+                        <span
+                          class="px-2 py-1 text-[10px] font-bold rounded-md"
+                          style={{ background: "rgba(16, 185, 129, 0.12)", color: "#6ee7b7", border: "1px solid rgba(16, 185, 129, 0.15)" }}
+                        >
+                          {model}
+                        </span>
+                      )}
+                    </For>
+                  </div>
+                  <div class="flex flex-wrap gap-1.5 mt-1.5">
+                    <span class="text-[9px] text-slate-500">Effort levels: </span>
+                    <For each={["low", "medium", "high"]}>
+                      {(effort) => (
+                        <span
+                          class="px-1.5 py-0.5 text-[9px] font-semibold rounded capitalize"
+                          style={{
+                            background: effort === "low" ? "rgba(59, 130, 246, 0.1)" : effort === "medium" ? "rgba(245, 158, 11, 0.1)" : "rgba(239, 68, 68, 0.1)",
+                            color: effort === "low" ? "#60a5fa" : effort === "medium" ? "#fbbf24" : "#f87171",
+                          }}
+                        >
+                          {effort}
+                        </span>
+                      )}
+                    </For>
+                  </div>
+                </div>
+              </Show>
+
+              {/* Account Cards */}
+              <Show
+                when={codexCreds().length > 0}
+                fallback={
+                  <div class="flex flex-col items-center justify-center py-12 gap-3">
+                    <div class="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background: "rgba(16, 185, 129, 0.1)", border: "1px solid rgba(16, 185, 129, 0.15)" }}>
+                      <span class="text-xl">+</span>
+                    </div>
+                    <span class="text-xs text-slate-500">No Codex accounts yet. Click "Add Accounts" to import.</span>
+                  </div>
+                }
+              >
+                <div class="flex flex-col gap-2.5">
+                  <For each={codexCreds()}>
+                    {(cred) => {
+                      const meta = (cred.value?.metadata || {}) as any
+
+                      return (
+                        <div class="flex flex-col p-3 rounded-lg gap-2" style={{ background: "rgba(16, 185, 129, 0.04)", border: "1px solid rgba(16, 185, 129, 0.12)" }}>
+                          <div class="flex flex-row justify-between items-center">
+                            <div class="flex flex-col">
+                              <span class="text-xs font-bold text-white">{meta.email || cred.label || "Codex Account"}</span>
+                              <div class="flex items-center gap-2 mt-0.5">
+                                <Show when={meta.plan}>
+                                  <span class="text-[9px] font-bold uppercase tracking-wider" style={{ color: meta.plan === "plus" || meta.plan === "pro" ? "#fbbf24" : "#94a3b8" }}>
+                                    {meta.plan}
+                                  </span>
+                                </Show>
+                                <Show when={meta.accountId}>
+                                  <span class="text-[9px] text-slate-600 font-mono">{(meta.accountId as string).substring(0, 12)}...</span>
+                                </Show>
+                              </div>
+                            </div>
+                            <div class="flex items-center gap-1.5">
+                              <Show when={meta.activeForCodex}>
+                                <span class="px-2 py-0.5 text-[10px] font-bold rounded-full" style={{ background: "rgba(16, 185, 129, 0.15)", color: "#6ee7b7" }}>
+                                  In Pool
+                                </span>
+                              </Show>
+                              <Show when={meta.rateLimitedUntil && Date.now() < meta.rateLimitedUntil}>
+                                <span class="px-2 py-0.5 text-[10px] font-bold rounded-full" style={{ background: "rgba(239, 68, 68, 0.15)", color: "#f87171" }}>
+                                  429
+                                </span>
+                              </Show>
+                              <Show when={!meta.rateLimitedUntil || Date.now() >= meta.rateLimitedUntil}>
+                                <span class="px-2 py-0.5 text-[10px] font-bold rounded-full" style={{ background: "rgba(34, 197, 94, 0.15)", color: "#4ade80" }}>
+                                  Ready
+                                </span>
+                              </Show>
+                              <button
+                                class="ml-1 p-1 rounded hover:bg-red-500/20 transition-colors text-slate-600 hover:text-red-400"
+                                onClick={() => removeCodexAccount(cred.id)}
+                                title="Remove account"
+                              >
+                                <Icon name="close" size="small" />
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Last used / refresh info */}
+                          <div class="flex items-center gap-3 text-[9px] text-slate-600">
+                            <Show when={meta.lastUsed}>
+                              <span>Last used: {new Date(meta.lastUsed).toLocaleString()}</span>
+                            </Show>
+                            <Show when={meta.lastRefresh}>
+                              <span>Refreshed: {new Date(meta.lastRefresh).toLocaleString()}</span>
+                            </Show>
+                          </div>
+                        </div>
+                      )
+                    }}
+                  </For>
+                </div>
+              </Show>
+            </div>
+          </Show>
+
+          {/* ═══════════════ USAGE TAB ═══════════════ */}
+          <Show when={activeTab() === "usage"}>
+            <div class="flex flex-col gap-4">
+              <div class="flex flex-row justify-between items-center pb-3" style={{ "border-bottom": "1px solid rgba(245, 158, 11, 0.2)" }}>
+                <div class="flex items-center gap-3">
+                  <div class="w-3 h-3 rounded-full" style={{ background: "#f59e0b" }} />
+                  <h3 class="text-sm font-bold text-white">Token Usage</h3>
+                  <select
+                    class="text-[11px] font-semibold rounded-lg px-2.5 py-1.5 outline-none cursor-pointer"
+                    style={{ background: "rgba(245, 158, 11, 0.1)", color: "#fbbf24", border: "1px solid rgba(245, 158, 11, 0.2)" }}
+                    value={timeFilter()}
+                    onChange={(e) => setTimeFilter(e.currentTarget.value as any)}
+                  >
+                    <option value="1d">1 Day</option>
+                    <option value="1w">1 Week</option>
+                    <option value="1m">1 Month</option>
+                    <option value="all">All Time</option>
+                  </select>
+                </div>
+                <button
+                  class="px-3 py-1.5 text-[11px] font-semibold rounded-lg transition-colors"
+                  style={{ background: "rgba(239, 68, 68, 0.1)", color: "#f87171", border: "1px solid rgba(239, 68, 68, 0.15)" }}
+                  onClick={resetUsage}
+                >
+                  Reset
+                </button>
+              </div>
+
+              {/* Summary Cards */}
+              <div class="grid grid-cols-3 gap-3">
+                <div class="flex flex-col p-3 rounded-lg" style={{ background: "rgba(99, 102, 241, 0.08)", border: "1px solid rgba(99, 102, 241, 0.15)" }}>
+                  <span class="text-[9px] font-bold text-indigo-400 uppercase tracking-wider">Total Processed</span>
+                  <span class="text-xl font-black text-white mt-1">
                     {(usageStats().totalInput + usageStats().totalOutput + usageStats().totalCache).toLocaleString()}
                   </span>
                 </div>
-                <div class="flex flex-col p-3 rounded border border-v2-border-default bg-v2-background-bg-subtle">
-                  <span class="text-11-medium text-v2-text-tertiary">CACHE READS</span>
-                  <span class="text-22-bold font-bold text-v2-text-primary mt-1 text-orange-500">
+                <div class="flex flex-col p-3 rounded-lg" style={{ background: "rgba(245, 158, 11, 0.08)", border: "1px solid rgba(245, 158, 11, 0.15)" }}>
+                  <span class="text-[9px] font-bold text-amber-400 uppercase tracking-wider">Cache Reads</span>
+                  <span class="text-xl font-black mt-1" style={{ color: "#fbbf24" }}>
                     {usageStats().totalCache.toLocaleString()}
                   </span>
                 </div>
-                <div class="flex flex-col p-3 rounded border border-v2-border-default bg-v2-background-bg-subtle">
-                  <span class="text-11-medium text-v2-text-tertiary">TOTAL I/O</span>
-                  <span class="text-22-bold font-bold text-v2-text-primary mt-1 text-green-500">
+                <div class="flex flex-col p-3 rounded-lg" style={{ background: "rgba(34, 197, 94, 0.08)", border: "1px solid rgba(34, 197, 94, 0.15)" }}>
+                  <span class="text-[9px] font-bold text-emerald-400 uppercase tracking-wider">I/O Tokens</span>
+                  <span class="text-xl font-black mt-1" style={{ color: "#4ade80" }}>
                     {(usageStats().totalInput + usageStats().totalOutput).toLocaleString()}
                   </span>
                 </div>
               </div>
 
-              {/* Detailed Breakdown */}
-              <div class="flex flex-col gap-2 min-h-0 flex-1">
-                <span class="text-13-bold font-bold text-v2-text-primary">Per-Model Breakdown</span>
-                <div class="flex flex-col gap-2 overflow-y-auto pr-2 pb-4">
-                  <Show when={usageStats().modelTotals.length > 0} fallback={
-                    <div class="text-12-regular text-v2-text-tertiary mt-2">No usage recorded in the selected period.</div>
-                  }>
+              {/* Per-model breakdown */}
+              <div class="flex flex-col gap-2">
+                <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Per-Model Breakdown</span>
+                <Show
+                  when={usageStats().modelTotals.length > 0}
+                  fallback={<div class="text-xs text-slate-600 py-4 text-center">No usage recorded.</div>}
+                >
+                  <div class="flex flex-col gap-2 overflow-y-auto pr-1 pb-4" style={{ "max-height": "300px" }}>
                     <For each={usageStats().modelTotals}>
-                      {([modelName, usage]) => (
-                        <div class="flex flex-row justify-between items-center p-3 rounded border border-v2-border-default bg-v2-background-bg-subtle">
-                          <div class="flex flex-col min-w-0 mr-4">
-                            <span class="text-13-medium text-v2-text-primary truncate">{modelName}</span>
-                            <span class="text-11-regular text-v2-text-tertiary truncate">
-                              In: {usage.input.toLocaleString()} &middot; Out: {usage.output.toLocaleString()} &middot; Cache: {usage.cache.toLocaleString()}
-                            </span>
+                      {([modelName, usage]) => {
+                        const total = usage.input + usage.output + usage.cache
+                        const maxTotal = usageStats().modelTotals[0]
+                          ? usageStats().modelTotals[0][1].input + usageStats().modelTotals[0][1].output + usageStats().modelTotals[0][1].cache
+                          : 1
+                        const barPercent = Math.max(5, Math.round((total / maxTotal) * 100))
+
+                        return (
+                          <div class="flex flex-col gap-1.5 p-2.5 rounded-lg" style={{ background: "rgba(148, 163, 184, 0.04)", border: "1px solid rgba(148, 163, 184, 0.08)" }}>
+                            <div class="flex flex-row justify-between items-center">
+                              <span class="text-xs font-semibold text-white truncate mr-3">{modelName}</span>
+                              <span class="text-xs font-bold text-slate-300 shrink-0">{total.toLocaleString()}</span>
+                            </div>
+                            <div class="w-full h-1 rounded-full overflow-hidden" style={{ background: "rgba(148, 163, 184, 0.08)" }}>
+                              <div
+                                class="h-full rounded-full"
+                                style={{
+                                  width: barPercent + "%",
+                                  background: "linear-gradient(90deg, #6366f1, #8b5cf6)",
+                                }}
+                              />
+                            </div>
+                            <div class="flex gap-3 text-[9px] text-slate-500">
+                              <span>
+                                In: <span class="text-blue-400">{usage.input.toLocaleString()}</span>
+                              </span>
+                              <span>
+                                Out: <span class="text-purple-400">{usage.output.toLocaleString()}</span>
+                              </span>
+                              <span>
+                                Cache: <span class="text-amber-400">{usage.cache.toLocaleString()}</span>
+                              </span>
+                            </div>
                           </div>
-                          <span class="text-14-bold font-bold text-v2-text-primary shrink-0">
-                            {(usage.input + usage.output + usage.cache).toLocaleString()}
-                          </span>
-                        </div>
-                      )}
+                        )
+                      }}
                     </For>
-                  </Show>
-                </div>
+                  </div>
+                </Show>
               </div>
             </div>
           </Show>
-
         </div>
       </div>
     </div>

@@ -13,8 +13,9 @@ import { GithubCopilotPlugin } from "./provider/github-copilot"
 import { GitLabPlugin } from "./provider/gitlab"
 import { GooglePlugin } from "./provider/google"
 import { GoogleAntigravityPlugin } from "./provider/google-antigravity"
+import { CodexOpenAIPlugin } from "./provider/codex-openai"
 
-export { GooglePlugin, GoogleAntigravityPlugin }
+export { GooglePlugin, GoogleAntigravityPlugin, CodexOpenAIPlugin }
 import { GoogleVertexAnthropicPlugin, GoogleVertexPlugin } from "./provider/google-vertex"
 import { GroqPlugin } from "./provider/groq"
 import { KiloPlugin } from "./provider/kilo"
@@ -52,6 +53,7 @@ export const ProviderPlugins: PluginInternal.Plugin<PluginInternal.Requirements 
   GitLabPlugin,
   GooglePlugin,
   GoogleAntigravityPlugin,
+  CodexOpenAIPlugin,
   GoogleVertexAnthropicPlugin,
   GoogleVertexPlugin,
   GroqPlugin,

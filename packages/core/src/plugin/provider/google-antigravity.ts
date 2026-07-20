@@ -963,6 +963,27 @@ export const GoogleAntigravityPlugin = define({
           const contentType = response.headers.get("content-type") ?? ""
           const isEventStream = contentType.includes("text/event-stream")
 
+          const recordUsage = (innerResponse: any) => {
+            if (innerResponse.usageMetadata && selectedCred) {
+              const usage = innerResponse.usageMetadata
+              const meta = selectedCred.value.metadata as any
+              const history = meta.usageHistory || []
+              history.push({
+                timestamp: Date.now(),
+                model: lowerModel,
+                inputTokens: usage.promptTokenCount || 0,
+                outputTokens: usage.candidatesTokenCount || 0,
+                cacheReadTokens: usage.cachedContentTokenCount || 0
+              })
+              
+              const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000
+              const filteredHistory = history.filter((h: any) => h.timestamp > thirtyDaysAgo)
+              meta.usageHistory = filteredHistory
+              const updatedValue = { ...(selectedCred.value as any), metadata: meta }
+              void runEffect(credentials.update(selectedCred.id, { value: updatedValue as any }).pipe(Effect.ignoreCause))
+            }
+          }
+
           if (isEventStream && response.body) {
             const encoder = new TextEncoder()
             const decoder = new TextDecoder()
@@ -1015,7 +1036,7 @@ export const GoogleAntigravityPlugin = define({
                           })
                         }
                       }
-                      
+                      recordUsage(innerResponse)
                       controller.enqueue(encoder.encode(`data: ${JSON.stringify(innerResponse)}\n`))
                     } else {
                       controller.enqueue(encoder.encode(line + "\n"))
@@ -1060,6 +1081,7 @@ export const GoogleAntigravityPlugin = define({
                               })
                             }
                           }
+                          recordUsage(innerResponse)
                           controller.enqueue(encoder.encode(`data: ${JSON.stringify(innerResponse)}\n`))
                           return
                         }
@@ -1107,6 +1129,7 @@ export const GoogleAntigravityPlugin = define({
                     })
                   }
                 }
+                recordUsage(innerResponse)
                 return new Response(JSON.stringify(innerResponse), {
                   status: response.status,
                   statusText: response.statusText,
