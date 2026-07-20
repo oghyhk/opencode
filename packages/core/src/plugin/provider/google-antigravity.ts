@@ -733,6 +733,26 @@ export const GoogleAntigravityPlugin = define({
           // Update active ID for the family
           if (selectedCred) {
             currentActiveCredIdByFamily[quotaGroup === "claude" ? "claude" : "gemini"] = selectedCred.id
+
+            // Clear activeForFamily on other credentials and set on selected one
+            for (const c of resolvedCreds) {
+              const meta = c.value.metadata as any
+              const isActive = c.id === selectedCred.id
+              const isFamily = meta.activeForFamily === quotaGroup
+              
+              if (isActive && !isFamily) {
+                const updatedMeta = { ...meta, activeForFamily: quotaGroup }
+                const updatedValue = { ...(c.value as any), metadata: updatedMeta }
+                await runEffect(credentials.update(c.id, { value: updatedValue as any }))
+                c.value = updatedValue
+              } else if (!isActive && isFamily) {
+                const updatedMeta = { ...meta }
+                delete updatedMeta.activeForFamily
+                const updatedValue = { ...(c.value as any), metadata: updatedMeta }
+                await runEffect(credentials.update(c.id, { value: updatedValue as any }))
+                c.value = updatedValue
+              }
+            }
           }
 
           // Resolve final token to use

@@ -169,6 +169,13 @@ export function DashboardOverlay() {
                               <span class="text-11-regular text-v2-text-tertiary">Project ID: {meta.projectId || "rising-fact-p41fc"}</span>
                             </div>
                             <div class="flex items-center gap-2">
+                              <Show when={meta.activeForFamily}>
+                                {(family) => (
+                                  <span class="px-2 py-0.5 text-11-medium text-blue-500 bg-blue-500/10 rounded capitalize">
+                                    Active {family() === "claude" ? "Claude" : "Gemini"}
+                                  </span>
+                                )}
+                              </Show>
                               <Show when={meta.rateLimitedUntil && Date.now() < meta.rateLimitedUntil}>
                                 <span class="px-2 py-0.5 text-11-medium text-red-500 bg-red-500/10 rounded">Rate Limited</span>
                               </Show>
