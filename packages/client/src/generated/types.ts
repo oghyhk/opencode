@@ -329,6 +329,27 @@ export type SessionsCreateOutput = {
 
 export type SessionsActiveOutput = { readonly data: { readonly [x: string]: { readonly type: "running" } } }["data"]
 
+export type SessionsUsageInput = { readonly since?: { readonly since?: number | undefined }["since"] }
+
+export type SessionsUsageOutput = {
+  readonly data: {
+    readonly models: ReadonlyArray<{
+      readonly providerID: string
+      readonly modelID: string
+      readonly input: number
+      readonly output: number
+      readonly reasoning: number
+      readonly cache: { readonly read: number; readonly write: number }
+      readonly cost: number
+    }>
+    readonly input: number
+    readonly output: number
+    readonly reasoning: number
+    readonly cache: { readonly read: number; readonly write: number }
+    readonly cost: number
+  }
+}["data"]
+
 export type SessionsGetInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
 
 export type SessionsGetOutput = {

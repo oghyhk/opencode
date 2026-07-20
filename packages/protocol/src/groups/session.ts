@@ -155,6 +155,20 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
       ),
     )
     .add(
+      HttpApiEndpoint.get("session.usage", "/api/session/usage", {
+        query: {
+          since: Schema.NumberFromString.pipe(Schema.optional),
+        },
+        success: Schema.Struct({ data: Session.Usage }),
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "v2.session.usage",
+          summary: "Get token usage",
+          description: "Aggregate durable assistant token usage by provider and model.",
+        }),
+      ),
+    )
+    .add(
       HttpApiEndpoint.get("session.get", "/api/session/:sessionID", {
         params: { sessionID: Session.ID },
         success: Schema.Struct({ data: Session.Info }),

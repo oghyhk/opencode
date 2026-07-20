@@ -3925,6 +3925,31 @@ export type SessionV2Info = {
   revert?: RevertState
 }
 
+export type SessionUsageModel = {
+  providerID: string
+  modelID: string
+  input: number
+  output: number
+  reasoning: number
+  cache: {
+    read: number
+    write: number
+  }
+  cost: number
+}
+
+export type SessionUsage = {
+  models: Array<SessionUsageModel>
+  input: number
+  output: number
+  reasoning: number
+  cache: {
+    read: number
+    write: number
+  }
+  cost: number
+}
+
 export type PromptInputFileAttachment = {
   uri: string
   name?: string
@@ -11434,6 +11459,39 @@ export type V2SessionActiveResponses = {
 }
 
 export type V2SessionActiveResponse = V2SessionActiveResponses[keyof V2SessionActiveResponses]
+
+export type V2SessionUsageData = {
+  body?: never
+  path?: never
+  query?: {
+    since?: string
+  }
+  url: "/api/session/usage"
+}
+
+export type V2SessionUsageErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2SessionUsageError = V2SessionUsageErrors[keyof V2SessionUsageErrors]
+
+export type V2SessionUsageResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: SessionUsage
+  }
+}
+
+export type V2SessionUsageResponse = V2SessionUsageResponses[keyof V2SessionUsageResponses]
 
 export type V2SessionGetData = {
   body?: never

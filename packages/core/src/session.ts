@@ -2,8 +2,8 @@ export * as SessionV2 from "./session"
 export * from "./session/schema"
 
 import { DateTime, Effect, Layer, Schema, Context, Stream } from "effect"
-import { ListAnchor } from "@opencode-ai/schema/session"
-import { and, asc, desc, eq, gt, like, lt, or, type SQL } from "drizzle-orm"
+import { ListAnchor, type Usage } from "@opencode-ai/schema/session"
+import { and, asc, desc, eq, gt, like, lt, or, sql, type SQL } from "drizzle-orm"
 import { ProjectV2 } from "./project"
 import { WorkspaceV2 } from "./workspace"
 import { ModelV2 } from "./model"
@@ -112,6 +112,7 @@ export type Error = NotFoundError | MessageDecodeError | OperationUnavailableErr
 
 export interface Interface {
   readonly list: (input?: ListInput) => Effect.Effect<SessionSchema.Info[]>
+  readonly usage: (input?: { since?: number }) => Effect.Effect<Usage>
   readonly create: (input: CreateInput) => Effect.Effect<SessionSchema.Info>
   readonly get: (sessionID: SessionSchema.ID) => Effect.Effect<SessionSchema.Info, NotFoundError>
   readonly messages: (input: {
@@ -300,6 +301,91 @@ const layer = Layer.effect(
           Effect.orDie,
         )
         return (direction === "previous" ? rows.toReversed() : rows).map((row) => fromRow(row))
+      }),
+      usage: Effect.fn("V2Session.usage")(function* (input = {}) {
+        const rows = yield* db
+          .all<{
+            providerID: string
+            modelID: string
+            input: number
+            output: number
+            reasoning: number
+            cacheRead: number
+            cacheWrite: number
+            cost: number
+          }>(
+            sql`
+            SELECT
+              providerID,
+              modelID,
+              coalesce(sum(input), 0) AS input,
+              coalesce(sum(output), 0) AS output,
+              coalesce(sum(reasoning), 0) AS reasoning,
+              coalesce(sum(cacheRead), 0) AS cacheRead,
+              coalesce(sum(cacheWrite), 0) AS cacheWrite,
+              coalesce(sum(cost), 0) AS cost
+            FROM (
+              SELECT
+                coalesce(json_extract(data, '$.model.providerID'), 'unknown') AS providerID,
+                coalesce(json_extract(data, '$.model.id'), 'unknown') AS modelID,
+                json_extract(data, '$.tokens.input') AS input,
+                json_extract(data, '$.tokens.output') AS output,
+                json_extract(data, '$.tokens.reasoning') AS reasoning,
+                json_extract(data, '$.tokens.cache.read') AS cacheRead,
+                json_extract(data, '$.tokens.cache.write') AS cacheWrite,
+                json_extract(data, '$.cost') AS cost
+              FROM session_message
+              WHERE type = 'assistant'
+                AND json_type(data, '$.tokens') = 'object'
+                ${input.since === undefined ? sql`` : sql`AND time_created >= ${input.since}`}
+
+              UNION ALL
+
+              SELECT
+                coalesce(json_extract(data, '$.providerID'), 'unknown') AS providerID,
+                coalesce(json_extract(data, '$.modelID'), 'unknown') AS modelID,
+                json_extract(data, '$.tokens.input') AS input,
+                json_extract(data, '$.tokens.output') AS output,
+                json_extract(data, '$.tokens.reasoning') AS reasoning,
+                json_extract(data, '$.tokens.cache.read') AS cacheRead,
+                json_extract(data, '$.tokens.cache.write') AS cacheWrite,
+                json_extract(data, '$.cost') AS cost
+              FROM message
+              WHERE json_extract(data, '$.role') = 'assistant'
+                AND json_type(data, '$.tokens') = 'object'
+                ${input.since === undefined ? sql`` : sql`AND time_created >= ${input.since}`}
+                AND NOT EXISTS (SELECT 1 FROM session_message WHERE session_message.id = message.id)
+            ) AS usage
+            GROUP BY providerID, modelID
+            ORDER BY input + output + reasoning + cacheRead + cacheWrite DESC
+          `,
+          )
+          .pipe(Effect.orDie)
+        return rows.reduce<Usage>(
+          (result, row) => ({
+            models: [
+              ...result.models,
+              {
+                providerID: row.providerID,
+                modelID: row.modelID,
+                input: row.input,
+                output: row.output,
+                reasoning: row.reasoning,
+                cache: { read: row.cacheRead, write: row.cacheWrite },
+                cost: row.cost,
+              },
+            ],
+            input: result.input + row.input,
+            output: result.output + row.output,
+            reasoning: result.reasoning + row.reasoning,
+            cache: {
+              read: result.cache.read + row.cacheRead,
+              write: result.cache.write + row.cacheWrite,
+            },
+            cost: result.cost + row.cost,
+          }),
+          { models: [], input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 }, cost: 0 },
+        )
       }),
       messages: Effect.fn("V2Session.messages")(function* (input) {
         yield* result.get(input.sessionID)

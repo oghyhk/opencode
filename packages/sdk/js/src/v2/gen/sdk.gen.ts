@@ -381,6 +381,8 @@ import type {
   V2SessionSwitchAgentResponses,
   V2SessionSwitchModelErrors,
   V2SessionSwitchModelResponses,
+  V2SessionUsageErrors,
+  V2SessionUsageResponses,
   V2SessionWaitErrors,
   V2SessionWaitResponses,
   V2SkillListErrors,
@@ -5514,6 +5516,25 @@ export class Session3 extends HeyApiClient {
     return (options?.client ?? this.client).get<V2SessionActiveResponses, V2SessionActiveErrors, ThrowOnError>({
       url: "/api/session/active",
       ...options,
+    })
+  }
+
+  /**
+   * Get token usage
+   *
+   * Aggregate durable assistant token usage by provider and model.
+   */
+  public usage<ThrowOnError extends boolean = false>(
+    parameters?: {
+      since?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "since" }] }])
+    return (options?.client ?? this.client).get<V2SessionUsageResponses, V2SessionUsageErrors, ThrowOnError>({
+      url: "/api/session/usage",
+      ...options,
+      ...params,
     })
   }
 

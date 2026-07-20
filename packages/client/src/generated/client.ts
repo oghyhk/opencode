@@ -9,6 +9,8 @@ import type {
   SessionsCreateInput,
   SessionsCreateOutput,
   SessionsActiveOutput,
+  SessionsUsageInput,
+  SessionsUsageOutput,
   SessionsGetInput,
   SessionsGetOutput,
   SessionsSwitchAgentInput,
@@ -326,6 +328,18 @@ export function make(options: ClientOptions) {
           {
             method: "GET",
             path: `/api/session/active`,
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      usage: (input?: SessionsUsageInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: SessionsUsageOutput }>(
+          {
+            method: "GET",
+            path: `/api/session/usage`,
+            query: { since: input?.["since"] },
             successStatus: 200,
             declaredStatuses: [401, 400],
             empty: false,

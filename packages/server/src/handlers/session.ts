@@ -88,6 +88,12 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
         }),
       )
       .handle(
+        "session.usage",
+        Effect.fn(function* (ctx) {
+          return { data: yield* session.usage({ since: ctx.query.since }) }
+        }),
+      )
+      .handle(
         "session.get",
         Effect.fn(function* (ctx) {
           return {

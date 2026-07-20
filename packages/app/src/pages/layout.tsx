@@ -1121,6 +1121,14 @@ export default function LegacyLayout(props: ParentProps) {
     })
   }
 
+  function openDashboard() {
+    const run = ++dialogRun
+    void import("@/components/dialog-usage-dashboard").then((x) => {
+      if (dialogDead || dialogRun !== run) return
+      dialog.show(() => <x.DialogUsageDashboard />)
+    })
+  }
+
   function projectRoot(directory: string) {
     const key = pathKey(directory)
     const project = layout.projects
@@ -2237,6 +2245,8 @@ export default function LegacyLayout(props: ParentProps) {
       renderProjectOverlay={projectOverlay}
       settingsLabel={() => language.t("sidebar.settings")}
       settingsKeybind={() => command.keybind("settings.open")}
+      dashboardLabel={() => "Dashboard"}
+      onOpenDashboard={openDashboard}
       onOpenSettings={openSettings}
       helpLabel={() => language.t("sidebar.help")}
       onOpenHelp={() => platform.openLink("https://opencode.ai/desktop-feedback")}

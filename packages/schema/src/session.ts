@@ -43,6 +43,33 @@ export const Info = Schema.Struct({
   revert: Revert.State.pipe(optional),
 }).annotate({ identifier: "SessionV2.Info" })
 
+export interface UsageModel extends Schema.Schema.Type<typeof UsageModel> {}
+export const UsageModel = Schema.Struct({
+  providerID: Schema.String,
+  modelID: Schema.String,
+  input: Schema.Finite,
+  output: Schema.Finite,
+  reasoning: Schema.Finite,
+  cache: Schema.Struct({
+    read: Schema.Finite,
+    write: Schema.Finite,
+  }),
+  cost: Schema.Finite,
+}).annotate({ identifier: "Session.UsageModel" })
+
+export interface Usage extends Schema.Schema.Type<typeof Usage> {}
+export const Usage = Schema.Struct({
+  models: Schema.Array(UsageModel),
+  input: Schema.Finite,
+  output: Schema.Finite,
+  reasoning: Schema.Finite,
+  cache: Schema.Struct({
+    read: Schema.Finite,
+    write: Schema.Finite,
+  }),
+  cost: Schema.Finite,
+}).annotate({ identifier: "Session.Usage" })
+
 export const ListAnchor = Schema.Struct({
   id: ID,
   time: Schema.Finite,
