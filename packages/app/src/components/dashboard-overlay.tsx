@@ -119,16 +119,10 @@ export function DashboardOverlay() {
     const token = refreshTokenInput().trim()
     if (!token) return
     try {
-      await (sdk().client as any).credential.create({
+      await (sdk().client as any).integrations.connectKey({
         integrationID: "google-antigravity",
         label: `Antigravity (${token.substring(0, 5)}...)`,
-        value: {
-          refreshToken: token,
-          metadata: {
-            email: "Imported via Token",
-            projectId: "rising-fact-p41fc"
-          }
-        }
+        key: token
       })
       setRefreshTokenInput("")
       fetchCreds()
@@ -142,21 +136,21 @@ export function DashboardOverlay() {
     setIsMigrating(true)
     try {
       const oldCreds = await (sdk().client as any).credential.list({ integrationID: "@zeklop/opencode-antigravity-auth" })
-      if (!oldCreds.data || oldCreds.data.length === 0) {
-        alert("No legacy plugin accounts found to migrate.")
-        setIsMigrating(false)
-        return
+      if (oldCreds.data && oldCreds.data.length > 0) {
+        for (const cred of oldCreds.data) {
+          if (cred.value?.refreshToken) {
+            await (sdk().client as any).integrations.connectKey({
+              integrationID: "google-antigravity",
+              label: cred.label,
+              key: cred.value.refreshToken
+            })
+            await (sdk().client as any).credentials.remove({ credentialID: cred.id })
+          }
+        }
+        alert(`Successfully migrated ${oldCreds.data.length} accounts to the native Antigravity integration!`)
+      } else {
+        alert("No legacy plugin accounts found to migrate. Please use the Add Account via Refresh Token input above.")
       }
-
-      for (const cred of oldCreds.data) {
-        await (sdk().client as any).credential.create({
-          integrationID: "google-antigravity",
-          label: cred.label,
-          value: cred.value
-        })
-        await (sdk().client as any).credential.delete({ id: cred.id })
-      }
-      alert(`Successfully migrated ${oldCreds.data.length} accounts to the native Antigravity integration!`)
       fetchCreds()
     } catch (e) {
       console.error("Failed to migrate legacy accounts", e)
