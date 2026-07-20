@@ -20,6 +20,11 @@ const scopes = [
 ]
 const redirectURI = "http://localhost:51121/oauth-callback"
 
+const currentActiveCredIdByFamily: Record<string, string | undefined> = {
+  claude: undefined,
+  gemini: undefined,
+}
+
 const Token = Schema.Struct({
   access_token: Schema.String,
   refresh_token: Schema.String.pipe(Schema.optional),
@@ -604,7 +609,7 @@ export const GoogleAntigravityPlugin = define({
 
             const credProjectId = meta.projectId || "rising-fact-p41fc"
 
-            if (token && (!cachedQuota || !cachedQuotaUpdatedAt || (now - cachedQuotaUpdatedAt) > 10 * 60 * 1000)) {
+            if (token && (!cachedQuota || !cachedQuotaUpdatedAt || (now - cachedQuotaUpdatedAt) > 60 * 1000)) {
               const freshQuota = await fetchQuotaForCredential(token, credProjectId)
               if (freshQuota) {
                 cachedQuota = freshQuota
@@ -617,7 +622,7 @@ export const GoogleAntigravityPlugin = define({
               }
             }
 
-            if (cachedQuota && cachedQuotaUpdatedAt && (now - cachedQuotaUpdatedAt) <= 10 * 60 * 1000) {
+            if (cachedQuota && cachedQuotaUpdatedAt && (now - cachedQuotaUpdatedAt) <= 60 * 1000) {
               const groupData = cachedQuota[quotaGroup]
               if (groupData && groupData.remainingFraction !== undefined && groupData.remainingFraction <= 0) {
                 // 0% remaining weekly quota fraction -> exclude
@@ -628,8 +633,21 @@ export const GoogleAntigravityPlugin = define({
             available.push(cred)
           }
 
+          // Sticky account selection check (preserve prompt cache stickiness)
+          const stickyCred = (() => {
+            const currentId = currentActiveCredIdByFamily[quotaGroup === "claude" ? "claude" : "gemini"]
+            if (!currentId) return undefined
+            
+            // Check if the current sticky credential is in the available pool
+            return available.find((c) => c.id === currentId)
+          })()
+
           // Select the best credential
           const selectedCred = (() => {
+            if (stickyCred) {
+              return stickyCred
+            }
+
             if (available.length === 0) {
               return resolvedCreds[0]
             }
@@ -639,7 +657,7 @@ export const GoogleAntigravityPlugin = define({
             const scored = available.map((c) => {
               const meta = c.value.metadata as any
               let rem = 1.0
-              if (meta.cachedQuota && meta.cachedQuotaUpdatedAt && (now - meta.cachedQuotaUpdatedAt) <= 10 * 60 * 1000) {
+              if (meta.cachedQuota && meta.cachedQuotaUpdatedAt && (now - meta.cachedQuotaUpdatedAt) <= 60 * 1000) {
                 const groupData = meta.cachedQuota[quotaGroup]
                 if (groupData && groupData.remainingFraction !== undefined) {
                   rem = Math.max(0, Math.min(1, groupData.remainingFraction))
@@ -656,6 +674,11 @@ export const GoogleAntigravityPlugin = define({
             const randomIndex = Math.floor(Math.random() * topCandidates.length)
             return topCandidates[randomIndex].cred
           })()
+
+          // Update active ID for the family
+          if (selectedCred) {
+            currentActiveCredIdByFamily[quotaGroup === "claude" ? "claude" : "gemini"] = selectedCred.id
+          }
 
           // Resolve final token to use
           let token = ""
