@@ -1,10 +1,10 @@
 import { For, Show, createSignal, createEffect, onMount } from "solid-js"
-import { useSDK } from "@/context/sdk"
+import { useServerSDK } from "@/context/server-sdk"
 import { setDashboardOpen } from "@/context/dashboard"
 import { Icon } from "@opencode-ai/ui/icon"
 
 export function DashboardOverlay() {
-  const sdk = useSDK()
+  const sdk = useServerSDK()
   const [activeTab, setActiveTab] = createSignal<"accounts" | "usage">("accounts")
   const [creds, setCreds] = createSignal<any[]>([])
   const [position, setPosition] = createSignal({ x: 150, y: 100 })

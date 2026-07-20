@@ -94,7 +94,7 @@ export const SidebarContent = (props: {
         <div class="shrink-0 w-full pt-3 pb-6 flex flex-col items-center gap-2">
           <Tooltip placement={placement()} value={props.dashboardLabel()}>
             <IconButton
-              icon={"pulse" as any}
+              icon="console"
               variant="ghost"
               size="large"
               onClick={props.onOpenDashboard}
