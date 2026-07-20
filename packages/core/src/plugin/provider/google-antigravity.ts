@@ -712,7 +712,7 @@ export const GoogleAntigravityPlugin = define({
             const scored = available.map((c) => {
               const meta = c.value.metadata as any
               let rem = 1.0
-              if (meta.cachedQuota && meta.cachedQuotaUpdatedAt && (now - meta.cachedQuotaUpdatedAt) <= 60 * 1000) {
+              if (meta.cachedQuota) {
                 const groupData = meta.cachedQuota[quotaGroup]
                 if (groupData && groupData.remainingFraction !== undefined) {
                   rem = Math.max(0, Math.min(1, groupData.remainingFraction))
