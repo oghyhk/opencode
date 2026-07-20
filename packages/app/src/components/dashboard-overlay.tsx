@@ -10,6 +10,8 @@ export function DashboardOverlay() {
   const [position, setPosition] = createSignal({ x: 150, y: 100 })
   const [refreshTokenInput, setRefreshTokenInput] = createSignal("")
   
+  const [timeFilter, setTimeFilter] = createSignal<"1d" | "1w" | "1m" | "all">("all")
+  
   let dragStart = { x: 0, y: 0 }
   let isDragging = false
 
@@ -53,32 +55,53 @@ export function DashboardOverlay() {
     return () => clearInterval(id)
   })
 
-  // Calculations for Usage Analytics
   const usageStats = () => {
     let totalInput = 0
     let totalOutput = 0
     let totalCache = 0
-    let totalCost = 0
     
+    const cutoff = Date.now() - (
+      timeFilter() === "1d" ? 1 * 24 * 60 * 60 * 1000 :
+      timeFilter() === "1w" ? 7 * 24 * 60 * 60 * 1000 :
+      timeFilter() === "1m" ? 30 * 24 * 60 * 60 * 1000 :
+      0
+    )
+
+    const modelTotals: Record<string, { input: number, output: number, cache: number }> = {}
+
     for (const c of creds()) {
-      const usage = c.value?.metadata?.usage
-      if (usage) {
-        totalInput += usage.inputTokens || 0
-        totalOutput += usage.outputTokens || 0
-        totalCache += usage.cacheReadTokens || 0
-        totalCost += usage.cost || 0
+      const history = c.value?.metadata?.usageHistory || []
+      for (const h of history) {
+        if (timeFilter() !== "all" && h.timestamp < cutoff) continue
+        totalInput += h.inputTokens || 0
+        totalOutput += h.outputTokens || 0
+        totalCache += h.cacheReadTokens || 0
+
+        const model = h.model || "unknown"
+        if (!modelTotals[model]) modelTotals[model] = { input: 0, output: 0, cache: 0 }
+        modelTotals[model].input += h.inputTokens || 0
+        modelTotals[model].output += h.outputTokens || 0
+        modelTotals[model].cache += h.cacheReadTokens || 0
       }
     }
 
-    return { totalInput, totalOutput, totalCache, totalCost }
+    // Sort models by total tokens descending
+    const sortedModelTotals = Object.entries(modelTotals).sort((a, b) => {
+      const aTotal = a[1].input + a[1].output + a[1].cache
+      const bTotal = b[1].input + b[1].output + b[1].cache
+      return bTotal - aTotal
+    })
+
+    return { totalInput, totalOutput, totalCache, modelTotals: sortedModelTotals }
   }
 
   const resetUsage = async () => {
     try {
       for (const c of creds()) {
         const meta = c.value?.metadata || {}
-        if (meta.usage) {
+        if (meta.usageHistory || meta.usage) {
           const updatedMeta = { ...meta }
+          delete updatedMeta.usageHistory
           delete updatedMeta.usage
           await (sdk().client as any).credential.update({
             id: c.id,
@@ -111,6 +134,35 @@ export function DashboardOverlay() {
       fetchCreds()
     } catch (e) {
       console.error("Failed to add account via refresh token", e)
+    }
+  }
+
+  const [isMigrating, setIsMigrating] = createSignal(false)
+  const migrateLegacyAccounts = async () => {
+    setIsMigrating(true)
+    try {
+      const oldCreds = await (sdk().client as any).credential.list({ integrationID: "@zeklop/opencode-antigravity-auth" })
+      if (!oldCreds.data || oldCreds.data.length === 0) {
+        alert("No legacy plugin accounts found to migrate.")
+        setIsMigrating(false)
+        return
+      }
+
+      for (const cred of oldCreds.data) {
+        await (sdk().client as any).credential.create({
+          integrationID: "google-antigravity",
+          label: cred.label,
+          value: cred.value
+        })
+        await (sdk().client as any).credential.delete({ id: cred.id })
+      }
+      alert(`Successfully migrated ${oldCreds.data.length} accounts to the native Antigravity integration!`)
+      fetchCreds()
+    } catch (e) {
+      console.error("Failed to migrate legacy accounts", e)
+      alert("Failed to migrate accounts. Check the console for details.")
+    } finally {
+      setIsMigrating(false)
     }
   }
 
@@ -174,7 +226,16 @@ export function DashboardOverlay() {
           
           <Show when={activeTab() === "accounts"}>
             <div class="flex flex-col gap-4">
-              <h3 class="text-15-bold font-bold text-v2-text-primary border-b border-v2-border-default pb-2">Antigravity Accounts</h3>
+              <div class="flex flex-row justify-between items-center border-b border-v2-border-default pb-2">
+                <h3 class="text-15-bold font-bold text-v2-text-primary">Antigravity Accounts</h3>
+                <button
+                  class="px-3 py-1 bg-green-500 hover:bg-green-600 text-white text-12-medium rounded transition-colors disabled:opacity-50"
+                  disabled={isMigrating()}
+                  onClick={migrateLegacyAccounts}
+                >
+                  {isMigrating() ? "Migrating..." : "Migrate Legacy Plugin Accounts"}
+                </button>
+              </div>
               
               {/* Add Account Section */}
               <div class="flex flex-col gap-2 p-3 rounded border border-v2-border-default bg-v2-background-bg-subtle">
@@ -242,7 +303,36 @@ export function DashboardOverlay() {
                                 const percent = Math.round(fraction * 100)
                                 const colorClass = percent > 50 ? "bg-green-500" : percent > 20 ? "bg-orange-500" : "bg-red-500"
 
-                                return (
+  const [isMigrating, setIsMigrating] = createSignal(false)
+  const migrateLegacyAccounts = async () => {
+    setIsMigrating(true)
+    try {
+      const oldCreds = await (sdk().client as any).credential.list({ integrationID: "@zeklop/opencode-antigravity-auth" })
+      if (!oldCreds.data || oldCreds.data.length === 0) {
+        alert("No legacy plugin accounts found to migrate.")
+        setIsMigrating(false)
+        return
+      }
+
+      for (const cred of oldCreds.data) {
+        await (sdk().client as any).credential.create({
+          integrationID: "google-antigravity",
+          label: cred.label,
+          value: cred.value
+        })
+        await (sdk().client as any).credential.delete({ id: cred.id })
+      }
+      alert(`Successfully migrated ${oldCreds.data.length} accounts to the native Antigravity integration!`)
+      fetchCreds()
+    } catch (e) {
+      console.error("Failed to migrate legacy accounts", e)
+      alert("Failed to migrate accounts. Check the console for details.")
+    } finally {
+      setIsMigrating(false)
+    }
+  }
+
+  return (
                                   <div class="flex flex-col gap-1">
                                     <div class="flex flex-row justify-between text-11-medium text-v2-text-secondary">
                                       <span class="capitalize">{group.replace("-", " ")} Quota</span>
@@ -268,7 +358,19 @@ export function DashboardOverlay() {
           <Show when={activeTab() === "usage"}>
             <div class="flex flex-col gap-4">
               <div class="flex flex-row justify-between items-center border-b border-v2-border-default pb-2 shrink-0">
-                <h3 class="text-15-bold font-bold text-v2-text-primary">Token Usage Analysis</h3>
+                <div class="flex items-center gap-4">
+                  <h3 class="text-15-bold font-bold text-v2-text-primary">Token Usage Analysis</h3>
+                  <select 
+                    class="bg-v2-background-bg-subtle border border-v2-border-default text-12-medium text-v2-text-primary rounded px-2 py-1 outline-none"
+                    value={timeFilter()}
+                    onChange={(e) => setTimeFilter(e.currentTarget.value as any)}
+                  >
+                    <option value="1d">Recent 1 Day</option>
+                    <option value="1w">Recent 1 Week</option>
+                    <option value="1m">Recent 1 Month</option>
+                    <option value="all">All Time</option>
+                  </select>
+                </div>
                 <button 
                   class="px-3 py-1 bg-red-500/10 hover:bg-red-500/20 text-12-medium text-red-500 border border-red-500/20 rounded transition-colors"
                   onClick={resetUsage}
@@ -278,14 +380,22 @@ export function DashboardOverlay() {
               </div>
 
               {/* Totals Summary Board */}
-              <div class="grid grid-cols-2 gap-3 shrink-0">
-                <div class="flex flex-col p-3 rounded border border-v2-border-default bg-v2-background-bg-subtle">
-                  <span class="text-11-medium text-v2-text-tertiary">ESTIMATED COST (USD)</span>
-                  <span class="text-22-bold font-bold text-v2-text-primary mt-1">${usageStats().totalCost.toFixed(4)}</span>
-                </div>
-                <div class="flex flex-col p-3 rounded border border-v2-border-default bg-v2-background-bg-subtle">
+              <div class="grid grid-cols-4 gap-3 shrink-0">
+                <div class="flex flex-col p-3 rounded border border-v2-border-default bg-v2-background-bg-subtle col-span-2">
                   <span class="text-11-medium text-v2-text-tertiary">TOTAL TOKENS PROCESSED</span>
                   <span class="text-22-bold font-bold text-v2-text-primary mt-1">
+                    {(usageStats().totalInput + usageStats().totalOutput + usageStats().totalCache).toLocaleString()}
+                  </span>
+                </div>
+                <div class="flex flex-col p-3 rounded border border-v2-border-default bg-v2-background-bg-subtle">
+                  <span class="text-11-medium text-v2-text-tertiary">CACHE READS</span>
+                  <span class="text-22-bold font-bold text-v2-text-primary mt-1 text-orange-500">
+                    {usageStats().totalCache.toLocaleString()}
+                  </span>
+                </div>
+                <div class="flex flex-col p-3 rounded border border-v2-border-default bg-v2-background-bg-subtle">
+                  <span class="text-11-medium text-v2-text-tertiary">TOTAL I/O</span>
+                  <span class="text-22-bold font-bold text-v2-text-primary mt-1 text-green-500">
                     {(usageStats().totalInput + usageStats().totalOutput).toLocaleString()}
                   </span>
                 </div>
@@ -293,25 +403,27 @@ export function DashboardOverlay() {
 
               {/* Detailed Breakdown */}
               <div class="flex flex-col gap-2 min-h-0 flex-1">
-                <span class="text-13-bold font-bold text-v2-text-primary">Per-Account Breakdown</span>
+                <span class="text-13-bold font-bold text-v2-text-primary">Per-Model Breakdown</span>
                 <div class="flex flex-col gap-2 overflow-y-auto pr-2 pb-4">
-                  <For each={creds()}>
-                    {(cred) => {
-                      const meta = (cred.value?.metadata || {}) as any
-                      const usage = meta.usage || { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cost: 0 }
-                      return (
+                  <Show when={usageStats().modelTotals.length > 0} fallback={
+                    <div class="text-12-regular text-v2-text-tertiary mt-2">No usage recorded in the selected period.</div>
+                  }>
+                    <For each={usageStats().modelTotals}>
+                      {([modelName, usage]) => (
                         <div class="flex flex-row justify-between items-center p-3 rounded border border-v2-border-default bg-v2-background-bg-subtle">
                           <div class="flex flex-col min-w-0 mr-4">
-                            <span class="text-13-medium text-v2-text-primary truncate">{meta.email || cred.label}</span>
+                            <span class="text-13-medium text-v2-text-primary truncate">{modelName}</span>
                             <span class="text-11-regular text-v2-text-tertiary truncate">
-                              In: {usage.inputTokens.toLocaleString()} &middot; Out: {usage.outputTokens.toLocaleString()} &middot; Cache: {usage.cacheReadTokens.toLocaleString()}
+                              In: {usage.input.toLocaleString()} &middot; Out: {usage.output.toLocaleString()} &middot; Cache: {usage.cache.toLocaleString()}
                             </span>
                           </div>
-                          <span class="text-14-bold font-bold text-v2-text-primary shrink-0">${usage.cost.toFixed(4)}</span>
+                          <span class="text-14-bold font-bold text-v2-text-primary shrink-0">
+                            {(usage.input + usage.output + usage.cache).toLocaleString()}
+                          </span>
                         </div>
-                      )
-                    }}
-                  </For>
+                      )}
+                    </For>
+                  </Show>
                 </div>
               </div>
             </div>
