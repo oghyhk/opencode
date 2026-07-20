@@ -80,6 +80,7 @@ import type {
   CredentialsUpdateOutput,
   CredentialsRemoveInput,
   CredentialsRemoveOutput,
+  CredentialsUsageOutput,
   PermissionsListRequestsInput,
   PermissionsListRequestsOutput,
   PermissionsListSavedInput,
@@ -777,6 +778,11 @@ export function make(options: ClientOptions) {
             declaredStatuses: [401, 400],
             empty: true,
           },
+          requestOptions,
+        ),
+      usage: (requestOptions?: RequestOptions) =>
+        request<CredentialsUsageOutput>(
+          { method: "GET", path: `/api/usage`, successStatus: 200, declaredStatuses: [401, 400], empty: false },
           requestOptions,
         ),
     },

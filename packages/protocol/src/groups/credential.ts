@@ -60,3 +60,25 @@ export const CredentialGroup = HttpApiGroup.make("server.credential")
         }),
       ),
   )
+  .add(
+    HttpApiEndpoint.get("credential.usage", "/api/usage", {
+      success: Location.response(Schema.Struct({
+        modelTotals: Schema.Array(Schema.Struct({
+          model: Schema.String,
+          input: Schema.Number,
+          output: Schema.Number,
+          cache: Schema.Number,
+        })),
+        totalInput: Schema.Number,
+        totalOutput: Schema.Number,
+        totalCache: Schema.Number,
+      })),
+    })
+      .annotateMerge(
+        OpenApi.annotations({
+          identifier: "v2.credential.usage",
+          summary: "Token usage",
+          description: "Get aggregated token usage across all credentials.",
+        }),
+      ),
+  )

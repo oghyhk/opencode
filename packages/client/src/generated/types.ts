@@ -2471,6 +2471,25 @@ export type CredentialsRemoveInput = {
 
 export type CredentialsRemoveOutput = void
 
+export type CredentialsUsageOutput = {
+  readonly location: {
+    readonly directory: string
+    readonly workspaceID?: string
+    readonly project: { readonly id: string; readonly directory: string }
+  }
+  readonly data: {
+    readonly modelTotals: ReadonlyArray<{
+      readonly model: string
+      readonly input: number | "Infinity" | "-Infinity" | "NaN"
+      readonly output: number | "Infinity" | "-Infinity" | "NaN"
+      readonly cache: number | "Infinity" | "-Infinity" | "NaN"
+    }>
+    readonly totalInput: number | "Infinity" | "-Infinity" | "NaN"
+    readonly totalOutput: number | "Infinity" | "-Infinity" | "NaN"
+    readonly totalCache: number | "Infinity" | "-Infinity" | "NaN"
+  }
+}
+
 export type PermissionsListRequestsInput = {
   readonly location?: {
     readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined

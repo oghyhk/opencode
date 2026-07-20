@@ -473,10 +473,14 @@ const Endpoint9_2 = (raw: RawClient["server.credential"]) => (input: Endpoint9_2
     query: { location: input["location"] },
   }).pipe(Effect.mapError(mapClientError))
 
+const Endpoint9_3 = (raw: RawClient["server.credential"]) => () =>
+  raw["credential.usage"]({}).pipe(Effect.mapError(mapClientError))
+
 const adaptGroup9 = (raw: RawClient["server.credential"]) => ({
   list: Endpoint9_0(raw),
   update: Endpoint9_1(raw),
   remove: Endpoint9_2(raw),
+  usage: Endpoint9_3(raw),
 })
 
 type Endpoint10_0Request = Parameters<RawClient["server.permission"]["permission.request.list"]>[0]
