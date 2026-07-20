@@ -90,6 +90,7 @@ export function shouldDisplayTabsToast(
 }
 
 export function shouldEnableNewLayout(previous: string | undefined, current: string | undefined) {
+  if (import.meta.env.VITE_OPENCODE_CHANNEL !== "prod") return false
   if (!current) return false
   const currentComparison = compareVersions(current, newLayoutDesignsUpgradeCutoff)
   if (!previous) return currentComparison !== undefined && currentComparison > 0
