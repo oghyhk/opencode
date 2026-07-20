@@ -1654,6 +1654,28 @@ export type ServerConfig = {
   cors?: Array<string>
 }
 
+export type SubagentConfig = {
+  default_tier?: "fast" | "balanced" | "deep"
+  tiers?: {
+    fast?: {
+      model?: string
+      effort?: string
+    }
+    balanced?: {
+      model?: string
+      effort?: string
+    }
+    deep?: {
+      model?: string
+      effort?: string
+    }
+  }
+  limits?: {
+    max_concurrent?: number
+    max_total_per_parent_turn?: number
+  }
+}
+
 export type PermissionActionConfig = "ask" | "allow" | "deny"
 
 export type PermissionObjectConfig = {
@@ -1929,6 +1951,7 @@ export type Config = {
   small_model?: string
   default_agent?: string
   subagent_depth?: number
+  subagents?: SubagentConfig
   username?: string
   mode?: {
     build?: AgentConfig

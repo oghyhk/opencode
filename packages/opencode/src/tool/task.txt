@@ -2,6 +2,13 @@ Launch a new agent to handle complex, multistep tasks autonomously.
 
 When using the Task tool, you must specify a subagent_type parameter to select which agent type to use.
 
+Choose a tier for every task based on its complexity:
+- `fast` for narrow exploration, file discovery, documentation lookup, and quick read-only checks.
+- `balanced` for routine implementation, tests, and ordinary debugging.
+- `deep` for ambiguous architecture, difficult debugging, security-sensitive work, and independent review.
+
+The user configures the model and reasoning effort behind each tier. Never request a raw model or effort directly.
+
 When NOT to use the Task tool:
 - If you want to read a specific file path, use the Read or Glob tool instead of the Task tool, to find the match more quickly
 - If you are searching for a specific class definition like "class Foo", use the Grep tool instead, to find the match more quickly

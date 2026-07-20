@@ -10247,6 +10247,70 @@
         ]
       }
     },
+    "/api/session/usage": {
+      "get": {
+        "tags": ["sessions"],
+        "operationId": "v2.session.usage",
+        "parameters": [
+          {
+            "name": "since",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/SessionUsage"
+                    }
+                  },
+                  "required": ["data"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvalidRequestError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UnauthorizedError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Aggregate durable assistant token usage by provider and model.",
+        "summary": "Get token usage",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.v2.session.usage({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/api/session/{sessionID}": {
       "get": {
         "tags": ["sessions"],
@@ -20560,6 +20624,72 @@
         "additionalProperties": false,
         "description": "Server configuration for opencode serve and web commands"
       },
+      "SubagentConfig": {
+        "type": "object",
+        "properties": {
+          "default_tier": {
+            "type": "string",
+            "enum": ["fast", "balanced", "deep"]
+          },
+          "tiers": {
+            "type": "object",
+            "properties": {
+              "fast": {
+                "type": "object",
+                "properties": {
+                  "model": {
+                    "type": "string"
+                  },
+                  "effort": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "balanced": {
+                "type": "object",
+                "properties": {
+                  "model": {
+                    "type": "string"
+                  },
+                  "effort": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "deep": {
+                "type": "object",
+                "properties": {
+                  "model": {
+                    "type": "string"
+                  },
+                  "effort": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          },
+          "limits": {
+            "type": "object",
+            "properties": {
+              "max_concurrent": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              },
+              "max_total_per_parent_turn": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
       "PermissionActionConfig": {
         "type": "string",
         "enum": ["ask", "allow", "deny"]
@@ -21266,6 +21396,9 @@
           "subagent_depth": {
             "type": "integer",
             "minimum": 0
+          },
+          "subagents": {
+            "$ref": "#/components/schemas/SubagentConfig"
           },
           "username": {
             "type": "string"
@@ -27296,6 +27429,82 @@
           }
         },
         "required": ["id", "projectID", "cost", "tokens", "time", "title", "location"],
+        "additionalProperties": false
+      },
+      "SessionUsageModel": {
+        "type": "object",
+        "properties": {
+          "providerID": {
+            "type": "string"
+          },
+          "modelID": {
+            "type": "string"
+          },
+          "input": {
+            "type": "number"
+          },
+          "output": {
+            "type": "number"
+          },
+          "reasoning": {
+            "type": "number"
+          },
+          "cache": {
+            "type": "object",
+            "properties": {
+              "read": {
+                "type": "number"
+              },
+              "write": {
+                "type": "number"
+              }
+            },
+            "required": ["read", "write"],
+            "additionalProperties": false
+          },
+          "cost": {
+            "type": "number"
+          }
+        },
+        "required": ["providerID", "modelID", "input", "output", "reasoning", "cache", "cost"],
+        "additionalProperties": false
+      },
+      "SessionUsage": {
+        "type": "object",
+        "properties": {
+          "models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SessionUsageModel"
+            }
+          },
+          "input": {
+            "type": "number"
+          },
+          "output": {
+            "type": "number"
+          },
+          "reasoning": {
+            "type": "number"
+          },
+          "cache": {
+            "type": "object",
+            "properties": {
+              "read": {
+                "type": "number"
+              },
+              "write": {
+                "type": "number"
+              }
+            },
+            "required": ["read", "write"],
+            "additionalProperties": false
+          },
+          "cost": {
+            "type": "number"
+          }
+        },
+        "required": ["models", "input", "output", "reasoning", "cache", "cost"],
         "additionalProperties": false
       },
       "PromptInputFileAttachment": {

@@ -10,6 +10,7 @@ import { Agent } from "../agent/agent"
 import { deriveSubagentSessionPermission } from "../agent/subagent-permissions"
 import type { SessionPrompt } from "../session/prompt"
 import { Config } from "@/config/config"
+import { Provider } from "@/provider/provider"
 import { Effect, Exit, Schema, Scope } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { RuntimeFlags } from "@/effect/runtime-flags"
@@ -44,6 +45,10 @@ const BaseParameterFields = {
   description: Schema.String.annotate({ description: "A short (3-5 words) description of the task" }),
   prompt: Schema.String.annotate({ description: "The task for the agent to perform" }),
   subagent_type: Schema.String.annotate({ description: "The type of specialized agent to use for this task" }),
+  tier: Schema.optional(Schema.Literals(["fast", "balanced", "deep"])).annotate({
+    description:
+      "The user-configured compute tier for this subagent. Choose fast for narrow exploration, balanced for routine work, or deep for difficult implementation and review.",
+  }),
   task_id: Schema.optional(Schema.String).annotate({
     description:
       "This should only be set if you mean to resume a previous task (you can pass a prior task_id and the task will continue the same subagent session as before instead of creating a fresh one)",
@@ -94,6 +99,8 @@ export const TaskTool = Tool.define(
       ctx: Tool.Context,
     ) {
       const cfg = yield* config.get()
+      const tier = params.tier ?? cfg.subagents?.default_tier ?? "balanced"
+      const profile = cfg.subagents?.tiers?.[tier]
       const runInBackground = params.background === true
       if (runInBackground && !flags.experimentalBackgroundSubagents) {
         return yield* Effect.fail(
@@ -136,6 +143,12 @@ export const TaskTool = Tool.define(
       const session = params.task_id
         ? yield* sessions.get(SessionID.make(params.task_id)).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
         : undefined
+      if (session?.parentID && session.parentID !== ctx.sessionID) {
+        return yield* Effect.fail(new Error(`Task ${session.id} does not belong to this session`))
+      }
+      if (session?.time.archived !== undefined) {
+        return yield* Effect.fail(new Error(`Task ${session.id} has been archived and cannot be resumed`))
+      }
       const childPermission = deriveSubagentSessionPermission({
         parentSessionPermission: parent.permission ?? [],
         subagent: next,
@@ -178,14 +191,33 @@ export const TaskTool = Tool.define(
       if (msg.info.role !== "assistant") return yield* Effect.fail(new Error("Not an assistant message"))
       const variant = msg.info.variant
 
-      const model = next.model ?? {
-        modelID: msg.info.modelID,
-        providerID: msg.info.providerID,
+      const configured = profile?.model ? Provider.parseModel(profile.model) : undefined
+      const model = session?.model
+        ? { modelID: session.model.id, providerID: session.model.providerID }
+        : (configured ??
+          next.model ?? {
+            modelID: msg.info.modelID,
+            providerID: msg.info.providerID,
+          })
+      const effort = session?.model?.variant ?? profile?.effort ?? next.variant ?? (next.model ? undefined : variant)
+      if (!session) {
+        yield* sessions.setAgentModel({
+          sessionID: nextSession.id,
+          agent: next.name,
+          model: {
+            id: model.modelID,
+            providerID: model.providerID,
+            variant: effort,
+          },
+          time: Date.now(),
+        })
       }
       const metadata = {
         parentSessionId: ctx.sessionID,
         sessionId: nextSession.id,
         model,
+        tier,
+        effort,
         ...(runInBackground ? { background: true } : {}),
       }
 
@@ -206,7 +238,7 @@ export const TaskTool = Tool.define(
             modelID: model.modelID,
             providerID: model.providerID,
           },
-          variant: next.model ? undefined : variant,
+          variant: effort,
           agent: next.name,
           parts,
         })

@@ -255,6 +255,94 @@ describe("tool.task", () => {
     }),
   )
 
+  it.instance(
+    "execute applies the selected subagent tier model and effort",
+    () =>
+      Effect.gen(function* () {
+        const { chat, assistant } = yield* seed()
+        const tool = yield* TaskTool
+        const def = yield* tool.init()
+        let seen: SessionPrompt.PromptInput | undefined
+
+        const result = yield* def.execute(
+          {
+            description: "review design",
+            prompt: "review the implementation plan",
+            subagent_type: "general",
+            tier: "deep",
+          },
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            abort: new AbortController().signal,
+            extra: { promptOps: stubOps({ onPrompt: (input) => (seen = input) }) },
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        )
+
+        expect(result.metadata.tier).toBe("deep")
+        expect(result.metadata.effort).toBe("high")
+        expect(result.metadata.model).toEqual({
+          providerID: ProviderV2.ID.make("tier-provider"),
+          modelID: ModelV2.ID.make("tier-model"),
+        })
+        expect(seen?.model).toEqual({
+          providerID: ProviderV2.ID.make("tier-provider"),
+          modelID: ModelV2.ID.make("tier-model"),
+        })
+        expect(seen?.variant).toBe("high")
+      }),
+    {
+      config: {
+        subagents: {
+          tiers: {
+            deep: {
+              model: "tier-provider/tier-model",
+              effort: "high",
+            },
+          },
+        },
+      },
+    },
+  )
+
+  it.instance("execute rejects a task session owned by another parent", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const { chat, assistant } = yield* seed()
+      const other = yield* sessions.create({ title: "Other parent" })
+      const child = yield* sessions.create({ parentID: other.id, title: "Other child" })
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+
+      const exit = yield* def
+        .execute(
+          {
+            description: "inspect bug",
+            prompt: "look into the cache key path",
+            subagent_type: "general",
+            task_id: child.id,
+          },
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            abort: new AbortController().signal,
+            extra: { promptOps: stubOps() },
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        )
+        .pipe(Effect.exit)
+
+      expect(Exit.isFailure(exit)).toBe(true)
+    }),
+  )
+
   it.instance("execute asks by default and skips checks when bypassed", () =>
     Effect.gen(function* () {
       const { chat, assistant } = yield* seed()
