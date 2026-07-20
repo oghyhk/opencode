@@ -445,14 +445,9 @@ const adaptGroup8 = (raw: RawClient["server.integration"]) => ({
 })
 
 type Endpoint9_0Request = Parameters<RawClient["server.credential"]["credential.list"]>[0]
-type Endpoint9_0Input = {
-  readonly location?: Endpoint9_0Request["query"]["location"]
-  readonly integrationID?: Endpoint9_0Request["query"]["integrationID"]
-}
+type Endpoint9_0Input = { readonly integrationID?: Endpoint9_0Request["query"]["integrationID"] }
 const Endpoint9_0 = (raw: RawClient["server.credential"]) => (input?: Endpoint9_0Input) =>
-  raw["credential.list"]({ query: { location: input?.["location"], integrationID: input?.["integrationID"] } }).pipe(
-    Effect.mapError(mapClientError),
-  )
+  raw["credential.list"]({ query: { integrationID: input?.["integrationID"] } }).pipe(Effect.mapError(mapClientError))
 
 type Endpoint9_1Request = Parameters<RawClient["server.credential"]["credential.update"]>[0]
 type Endpoint9_1Input = {

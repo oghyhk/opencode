@@ -2426,14 +2426,7 @@ export type IntegrationsSetActiveAccountInput = {
 export type IntegrationsSetActiveAccountOutput = void
 
 export type CredentialsListInput = {
-  readonly location?: {
-    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
-    readonly integrationID?: string | undefined
-  }["location"]
-  readonly integrationID?: {
-    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
-    readonly integrationID?: string | undefined
-  }["integrationID"]
+  readonly integrationID?: { readonly integrationID?: string | undefined }["integrationID"]
 }
 
 export type CredentialsListOutput = {

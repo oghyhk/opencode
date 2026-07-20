@@ -747,7 +747,7 @@ export function make(options: ClientOptions) {
           {
             method: "GET",
             path: `/api/credential`,
-            query: { location: input?.["location"], integrationID: input?.["integrationID"] },
+            query: { integrationID: input?.["integrationID"] },
             successStatus: 200,
             declaredStatuses: [401, 400],
             empty: false,

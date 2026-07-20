@@ -466,6 +466,14 @@ export function DashboardOverlay() {
                 <div class="flex items-center gap-2">
                   <div class="w-3 h-3 rounded-full" style={{ background: "#3b82f6" }} />
                   <h3 class="text-sm font-bold text-white">Google Antigravity</h3>
+                  <button
+                    class="ml-1 p-1 rounded hover:bg-white/10 transition-colors"
+                    style={{ color: "#94a3b8" }}
+                    onClick={fetchAllCreds}
+                    title="Refresh accounts"
+                  >
+                    <Icon name={"rotate-cw" as any} size="small" />
+                  </button>
                 </div>
                 <button
                   class="px-3 py-1.5 text-[11px] font-semibold rounded-lg transition-colors disabled:opacity-40"
@@ -473,7 +481,7 @@ export function DashboardOverlay() {
                   disabled={isMigrating()}
                   onClick={migrateLegacyAccounts}
                 >
-                  {isMigrating() ? "Migrating..." : "Migrate Legacy"}
+                  {isMigrating() ? "Migrating..." : "Migrate Plugin Accounts"}
                 </button>
               </div>
 
@@ -757,6 +765,14 @@ export function DashboardOverlay() {
                     <option value="1m">1 Month</option>
                     <option value="all">All Time</option>
                   </select>
+                  <button
+                    class="p-1 rounded hover:bg-white/10 transition-colors"
+                    style={{ color: "#94a3b8" }}
+                    onClick={fetchAllCreds}
+                    title="Refresh usage data"
+                  >
+                    <Icon name={"rotate-cw" as any} size="small" />
+                  </button>
                 </div>
                 <button
                   class="px-3 py-1.5 text-[11px] font-semibold rounded-lg transition-colors"

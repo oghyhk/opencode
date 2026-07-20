@@ -16,10 +16,11 @@ export const CredentialInfo = Schema.Struct({
 export const CredentialGroup = HttpApiGroup.make("server.credential")
   .add(
     HttpApiEndpoint.get("credential.list", "/api/credential", {
-      query: Schema.Struct({ ...LocationQuery.fields, integrationID: Schema.optional(Integration.ID) }),
+      query: Schema.Struct({
+        integrationID: Schema.optional(Integration.ID),
+      }),
       success: Location.response(Schema.Array(CredentialInfo)),
     })
-      .annotateMerge(locationQueryOpenApi)
       .annotateMerge(
         OpenApi.annotations({
           identifier: "v2.credential.list",
