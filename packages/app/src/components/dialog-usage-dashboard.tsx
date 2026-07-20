@@ -43,9 +43,11 @@ export function DialogUsageDashboard() {
     const range = ranges.find((item) => item.value === state.range)
     const since = range?.duration === undefined ? undefined : Date.now() - range.duration
     await sdk()
-      .client.session.usage({ since: since?.toString() })
+      .client.v2.session.usage({ since: since?.toString() })
       .then((response) => {
-        setState("usage", response.data)
+        const usage = response.data?.data
+        if (!usage) throw new Error("Usage response is empty")
+        setState("usage", usage)
         setState("status", "ready")
       })
       .catch(() => setState("status", "error"))
