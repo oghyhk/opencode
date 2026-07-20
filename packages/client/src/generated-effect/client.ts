@@ -418,6 +418,20 @@ const Endpoint8_7 = (raw: RawClient["server.integration"]) => (input: Endpoint8_
     query: { location: input["location"] },
   }).pipe(Effect.mapError(mapClientError))
 
+type Endpoint8_8Request = Parameters<RawClient["server.integration"]["integration.setActiveAccount"]>[0]
+type Endpoint8_8Input = {
+  readonly integrationID: Endpoint8_8Request["params"]["integrationID"]
+  readonly location?: Endpoint8_8Request["query"]["location"]
+  readonly credentialID: Endpoint8_8Request["payload"]["credentialID"]
+  readonly family: Endpoint8_8Request["payload"]["family"]
+}
+const Endpoint8_8 = (raw: RawClient["server.integration"]) => (input: Endpoint8_8Input) =>
+  raw["integration.setActiveAccount"]({
+    params: { integrationID: input["integrationID"] },
+    query: { location: input["location"] },
+    payload: { credentialID: input["credentialID"], family: input["family"] },
+  }).pipe(Effect.mapError(mapClientError))
+
 const adaptGroup8 = (raw: RawClient["server.integration"]) => ({
   list: Endpoint8_0(raw),
   get: Endpoint8_1(raw),
@@ -427,33 +441,48 @@ const adaptGroup8 = (raw: RawClient["server.integration"]) => ({
   attemptComplete: Endpoint8_5(raw),
   attemptCancel: Endpoint8_6(raw),
   migratePlugin: Endpoint8_7(raw),
+  setActiveAccount: Endpoint8_8(raw),
 })
 
-type Endpoint9_0Request = Parameters<RawClient["server.credential"]["credential.update"]>[0]
+type Endpoint9_0Request = Parameters<RawClient["server.credential"]["credential.list"]>[0]
 type Endpoint9_0Input = {
-  readonly credentialID: Endpoint9_0Request["params"]["credentialID"]
   readonly location?: Endpoint9_0Request["query"]["location"]
-  readonly label: Endpoint9_0Request["payload"]["label"]
+  readonly integrationID?: Endpoint9_0Request["query"]["integrationID"]
 }
-const Endpoint9_0 = (raw: RawClient["server.credential"]) => (input: Endpoint9_0Input) =>
+const Endpoint9_0 = (raw: RawClient["server.credential"]) => (input?: Endpoint9_0Input) =>
+  raw["credential.list"]({ query: { location: input?.["location"], integrationID: input?.["integrationID"] } }).pipe(
+    Effect.mapError(mapClientError),
+  )
+
+type Endpoint9_1Request = Parameters<RawClient["server.credential"]["credential.update"]>[0]
+type Endpoint9_1Input = {
+  readonly credentialID: Endpoint9_1Request["params"]["credentialID"]
+  readonly location?: Endpoint9_1Request["query"]["location"]
+  readonly label: Endpoint9_1Request["payload"]["label"]
+}
+const Endpoint9_1 = (raw: RawClient["server.credential"]) => (input: Endpoint9_1Input) =>
   raw["credential.update"]({
     params: { credentialID: input["credentialID"] },
     query: { location: input["location"] },
     payload: { label: input["label"] },
   }).pipe(Effect.mapError(mapClientError))
 
-type Endpoint9_1Request = Parameters<RawClient["server.credential"]["credential.remove"]>[0]
-type Endpoint9_1Input = {
-  readonly credentialID: Endpoint9_1Request["params"]["credentialID"]
-  readonly location?: Endpoint9_1Request["query"]["location"]
+type Endpoint9_2Request = Parameters<RawClient["server.credential"]["credential.remove"]>[0]
+type Endpoint9_2Input = {
+  readonly credentialID: Endpoint9_2Request["params"]["credentialID"]
+  readonly location?: Endpoint9_2Request["query"]["location"]
 }
-const Endpoint9_1 = (raw: RawClient["server.credential"]) => (input: Endpoint9_1Input) =>
+const Endpoint9_2 = (raw: RawClient["server.credential"]) => (input: Endpoint9_2Input) =>
   raw["credential.remove"]({
     params: { credentialID: input["credentialID"] },
     query: { location: input["location"] },
   }).pipe(Effect.mapError(mapClientError))
 
-const adaptGroup9 = (raw: RawClient["server.credential"]) => ({ update: Endpoint9_0(raw), remove: Endpoint9_1(raw) })
+const adaptGroup9 = (raw: RawClient["server.credential"]) => ({
+  list: Endpoint9_0(raw),
+  update: Endpoint9_1(raw),
+  remove: Endpoint9_2(raw),
+})
 
 type Endpoint10_0Request = Parameters<RawClient["server.permission"]["permission.request.list"]>[0]
 type Endpoint10_0Input = { readonly location?: Endpoint10_0Request["query"]["location"] }

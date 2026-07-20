@@ -141,6 +141,26 @@ export const IntegrationGroup = HttpApiGroup.make("server.integration")
         }),
       ),
   )
+  .add(
+    HttpApiEndpoint.post("integration.setActiveAccount", "/api/integration/:integrationID/active-account", {
+      params: { integrationID: Integration.ID },
+      query: LocationQuery,
+      payload: Schema.Struct({
+        credentialID: Schema.String,
+        family: Schema.String
+      }),
+      success: HttpApiSchema.NoContent,
+      error: InvalidRequestError,
+    })
+      .annotateMerge(locationQueryOpenApi)
+      .annotateMerge(
+        OpenApi.annotations({
+          identifier: "v2.integration.setActiveAccount",
+          summary: "Set active account",
+          description: "Manually set the active account for a specific model family.",
+        }),
+      ),
+  )
   .annotateMerge(
     OpenApi.annotations({ title: "integrations", description: "Integration discovery and authentication routes." }),
   )

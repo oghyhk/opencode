@@ -149,7 +149,7 @@ export function DashboardOverlay() {
 
   const fetchGoogleCreds = async () => {
     try {
-      const res = await (sdk().client as any).credential.list({ integrationID: "google-antigravity" })
+      const res = await (sdk().client as any).credentials.list({ integrationID: "google-antigravity" })
       if (res.data) setGoogleCreds(res.data)
     } catch (e) {
       console.error(e)
@@ -158,7 +158,7 @@ export function DashboardOverlay() {
 
   const fetchCodexCreds = async () => {
     try {
-      const res = await (sdk().client as any).credential.list({ integrationID: "codex-openai" })
+      const res = await (sdk().client as any).credentials.list({ integrationID: "codex-openai" })
       if (res.data) setCodexCreds(res.data)
     } catch (e) {
       console.error(e)
@@ -193,6 +193,20 @@ export function DashboardOverlay() {
     }
   }
 
+  // ── Google: Set active account manually ──
+  const setActiveGoogleAccount = async (id: string, family: string) => {
+    try {
+      const client = sdk().client as any
+      if (client.v2?.integration?.setActiveAccount) {
+        await client.v2.integration.setActiveAccount({ integrationID: "google-antigravity", credentialID: id, family })
+      } else {
+        await client.integrations.setActiveAccount({ integrationID: "google-antigravity", credentialID: id, family })
+      }
+      fetchGoogleCreds()
+    } catch (e) {
+      console.error("Failed to set active account", e)
+    }
+  }
   // ── Google: Migrate legacy accounts ──
   const migrateLegacyAccounts = async () => {
     setIsMigrating(true)
@@ -516,6 +530,22 @@ export function DashboardOverlay() {
                                     Active {family() === "claude" ? "Claude" : "Gemini"}
                                   </span>
                                 )}
+                              </Show>
+                              <Show when={!meta.activeForFamily || meta.activeForFamily !== "claude"}>
+                                <button
+                                  class="px-2 py-0.5 text-[9px] font-bold rounded-md bg-slate-800 hover:bg-indigo-600 text-slate-300 hover:text-white transition-colors border border-slate-700 hover:border-indigo-500"
+                                  onClick={() => setActiveGoogleAccount(cred.id, "claude")}
+                                >
+                                  Make Active (Claude)
+                                </button>
+                              </Show>
+                              <Show when={!meta.activeForFamily || meta.activeForFamily !== "gemini"}>
+                                <button
+                                  class="px-2 py-0.5 text-[9px] font-bold rounded-md bg-slate-800 hover:bg-sky-600 text-slate-300 hover:text-white transition-colors border border-slate-700 hover:border-sky-500"
+                                  onClick={() => setActiveGoogleAccount(cred.id, "gemini")}
+                                >
+                                  Make Active (Gemini)
+                                </button>
                               </Show>
                               <Show when={meta.rateLimitedUntil && Date.now() < meta.rateLimitedUntil}>
                                 <span class="px-2 py-0.5 text-[10px] font-bold rounded-full" style={{ background: "rgba(239, 68, 68, 0.15)", color: "#f87171" }}>

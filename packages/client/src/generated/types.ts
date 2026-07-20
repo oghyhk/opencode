@@ -2414,6 +2414,51 @@ export type IntegrationsMigratePluginOutput = {
   }
 }
 
+export type IntegrationsSetActiveAccountInput = {
+  readonly integrationID: { readonly integrationID: string }["integrationID"]
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+  }["location"]
+  readonly credentialID: { readonly credentialID: string; readonly family: string }["credentialID"]
+  readonly family: { readonly credentialID: string; readonly family: string }["family"]
+}
+
+export type IntegrationsSetActiveAccountOutput = void
+
+export type CredentialsListInput = {
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+    readonly integrationID?: string | undefined
+  }["location"]
+  readonly integrationID?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+    readonly integrationID?: string | undefined
+  }["integrationID"]
+}
+
+export type CredentialsListOutput = {
+  readonly location: {
+    readonly directory: string
+    readonly workspaceID?: string
+    readonly project: { readonly id: string; readonly directory: string }
+  }
+  readonly data: ReadonlyArray<{
+    readonly id: string
+    readonly integrationID: string
+    readonly label: string
+    readonly value:
+      | {
+          readonly type: "oauth"
+          readonly methodID: string
+          readonly refresh: string
+          readonly access: string
+          readonly expires: number
+          readonly metadata?: { readonly [x: string]: JsonValue }
+        }
+      | { readonly type: "key"; readonly key: string; readonly metadata?: { readonly [x: string]: JsonValue } }
+  }>
+}
+
 export type CredentialsUpdateInput = {
   readonly credentialID: { readonly credentialID: string }["credentialID"]
   readonly location?: {

@@ -72,6 +72,10 @@ import type {
   IntegrationsAttemptCancelOutput,
   IntegrationsMigratePluginInput,
   IntegrationsMigratePluginOutput,
+  IntegrationsSetActiveAccountInput,
+  IntegrationsSetActiveAccountOutput,
+  CredentialsListInput,
+  CredentialsListOutput,
   CredentialsUpdateInput,
   CredentialsUpdateOutput,
   CredentialsRemoveInput,
@@ -723,8 +727,33 @@ export function make(options: ClientOptions) {
           },
           requestOptions,
         ),
+      setActiveAccount: (input: IntegrationsSetActiveAccountInput, requestOptions?: RequestOptions) =>
+        request<IntegrationsSetActiveAccountOutput>(
+          {
+            method: "POST",
+            path: `/api/integration/${encodeURIComponent(input.integrationID)}/active-account`,
+            query: { location: input["location"] },
+            body: { credentialID: input["credentialID"], family: input["family"] },
+            successStatus: 204,
+            declaredStatuses: [400, 401],
+            empty: true,
+          },
+          requestOptions,
+        ),
     },
     credentials: {
+      list: (input?: CredentialsListInput, requestOptions?: RequestOptions) =>
+        request<CredentialsListOutput>(
+          {
+            method: "GET",
+            path: `/api/credential`,
+            query: { location: input?.["location"], integrationID: input?.["integrationID"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
       update: (input: CredentialsUpdateInput, requestOptions?: RequestOptions) =>
         request<CredentialsUpdateOutput>(
           {

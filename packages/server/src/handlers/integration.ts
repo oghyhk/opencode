@@ -109,13 +109,16 @@ export const IntegrationHandler = HttpApiBuilder.group(Api, "server.integration"
           const service = yield* Integration.Service
           const fs = yield* FSUtil.Service
           const configDir = Global.Path.config
-          const pluginAccountsPath = path.join(configDir, "..", "opencode", "antigravity-accounts.json")
+          const pluginAccountsPath = path.join(configDir, "antigravity-accounts.json")
 
           let migrated = 0
           let skipped = 0
 
+          yield* Effect.logInfo(`Migrating plugin accounts from ${pluginAccountsPath}`)
+
           const exists = yield* fs.exists(pluginAccountsPath).pipe(Effect.orElseSucceed(() => false))
           if (exists) {
+            yield* Effect.logInfo(`Plugin accounts file exists. Reading...`)
             const content = yield* fs.readFileString(pluginAccountsPath).pipe(Effect.orElseSucceed(() => ""))
             if (content) {
               try {
@@ -124,6 +127,7 @@ export const IntegrationHandler = HttpApiBuilder.group(Api, "server.integration"
                   for (const acc of parsed.accounts) {
                     if (acc && acc.refreshToken && acc.enabled !== false) {
                       const label = acc.email || `Antigravity (${acc.refreshToken.substring(0, 8)}...)`
+                      yield* Effect.logInfo(`Migrating account: ${label}`)
                       const ok = yield* authorize(
                         service.connection.key({
                           integrationID: ctx.params.integrationID,
@@ -145,12 +149,33 @@ export const IntegrationHandler = HttpApiBuilder.group(Api, "server.integration"
                   }
                 }
               } catch (e) {
-                // Ignore parse failure
+                yield* Effect.logError(`Failed to parse plugin accounts JSON: ${e}`)
               }
+            } else {
+              yield* Effect.logWarning(`Plugin accounts file is empty`)
             }
+          } else {
+            yield* Effect.logWarning(`Plugin accounts file NOT found at ${pluginAccountsPath}`)
           }
 
           return yield* response(Effect.succeed({ migrated, skipped }))
+        }),
+      )
+      .handle(
+        "integration.setActiveAccount",
+        Effect.fn(function* (ctx) {
+          const { credentialID, family } = ctx.payload
+          // We communicate this manual selection to the provider through a global or event
+          // The cleanest way in this architecture without rewriting the plugin system is to
+          // directly update the currentActiveCredIdByFamily if we can access it, or trigger
+          // a config mutation that the provider reads.
+          // Since google-antigravity uses a top-level module variable currentActiveCredIdByFamily,
+          // we can import it and set it directly!
+          const providerModule = yield* Effect.promise(() => import("@opencode-ai/core/plugin/provider/google-antigravity"))
+          if (providerModule && providerModule.currentActiveCredIdByFamily) {
+            providerModule.currentActiveCredIdByFamily[family === "claude" ? "claude" : "gemini"] = credentialID
+          }
+          return HttpApiSchema.NoContent.make()
         }),
       )
   }),

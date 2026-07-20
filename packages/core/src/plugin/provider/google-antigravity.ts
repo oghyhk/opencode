@@ -20,7 +20,7 @@ const scopes = [
 ]
 const redirectURI = "http://localhost:51121/oauth-callback"
 
-const currentActiveCredIdByFamily: Record<string, string | undefined> = {
+export const currentActiveCredIdByFamily: Record<string, string | undefined> = {
   claude: undefined,
   gemini: undefined,
 }
