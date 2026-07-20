@@ -1,4 +1,6 @@
 import { AISDK } from "@opencode-ai/core/aisdk"
+import { Credential } from "@opencode-ai/core/credential"
+import { Integration } from "@opencode-ai/core/integration"
 import { describe, expect } from "bun:test"
 import { Effect } from "effect"
 import { ModelV2 } from "@opencode-ai/core/model"
@@ -186,6 +188,75 @@ describe("GoogleAntigravityPlugin", () => {
         
         expect(content[1].type).toBe("text")
         expect(content[1].text).toBe("Here is the answer")
+      } finally {
+        globalThis.fetch = originalFetch
+      }
+    }),
+  )
+
+  it.effect("supports manual refresh token credentials and quota-first selection", () =>
+    Effect.gen(function* () {
+      const credentials = yield* Credential.Service
+      const aisdk = yield* AISDK.Service
+      yield* addPlugin()
+
+      // Add a manual refresh token credential
+      yield* credentials.create({
+        integrationID: Integration.ID.make("google-antigravity"),
+        label: "Manual Refresh Token Account",
+        value: Credential.Key.make({
+          type: "key",
+          key: "test-refresh-token",
+          metadata: {
+            cachedQuota: {
+              claude: { remainingFraction: 0.95 }
+            },
+            cachedQuotaUpdatedAt: Date.now()
+          }
+        })
+      })
+
+      const model = ModelV2.Info.make({
+        ...ModelV2.Info.empty(ProviderV2.ID.make("google-antigravity"), ModelV2.ID.make("antigravity-claude-opus-4-6-thinking")),
+        api: { id: ModelV2.ID.make("claude-opus-4-6-thinking"), type: "aisdk", package: "@ai-sdk/google" },
+        request: { headers: {}, body: { apiKey: "test" } }
+      })
+      const language = yield* aisdk.language(model)
+
+      let authHeader = ""
+      const originalFetch = globalThis.fetch
+      globalThis.fetch = (async (url: any, init: any) => {
+        const urlStr = typeof url === "string" ? url : url.toString()
+        if (urlStr.includes("oauth2.googleapis.com/token")) {
+          return new Response(JSON.stringify({ access_token: "mock-access-token", expires_in: 3600 }))
+        }
+        if (urlStr.includes("oauth2/v1/userinfo")) {
+          return new Response(JSON.stringify({ email: "test@example.com" }))
+        }
+        if (urlStr.includes("loadCodeAssist")) {
+          return new Response(JSON.stringify({ cloudaicompanionProject: "test-project" }))
+        }
+        const headers = new Headers(init?.headers)
+        if (urlStr.includes("cloudcode-pa.googleapis.com")) {
+          authHeader = headers.get("Authorization") || ""
+        }
+        return new Response(JSON.stringify({
+          response: {
+            candidates: [{ content: { parts: [{ text: "Done" }] } }]
+          }
+        }), { status: 200, headers: { "Content-Type": "application/json" } })
+      }) as any
+
+      try {
+        const response = yield* Effect.promise(() => language.doGenerate({
+          inputFormat: "prompt-update",
+          mode: "regular",
+          prompt: [{ role: "user", content: [{ type: "text", text: "hi" }] }]
+        } as any))
+
+        expect(authHeader).toBe("Bearer mock-access-token")
+        const content = response.content as any[]
+        expect(content[0].text).toBe("Done")
       } finally {
         globalThis.fetch = originalFetch
       }

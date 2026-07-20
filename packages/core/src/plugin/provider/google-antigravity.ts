@@ -179,11 +179,22 @@ function oauth() {
 export const GoogleAntigravityPlugin = define({
   id: "google-antigravity",
   effect: Effect.fn(function* (ctx) {
+    const integrations = yield* Integration.Service
+    const credentials = yield* Credential.Service
+
     yield* ctx.integration.transform((draft: any) => {
       draft.update("google-antigravity", (integration: any) => {
         integration.name = "Google Antigravity"
       })
       draft.method.update(oauth())
+      draft.method.update({
+        integrationID: Integration.ID.make("google-antigravity"),
+        method: {
+          id: Integration.MethodID.make("refresh-token"),
+          type: "key" as const,
+          label: "Manual Refresh Token",
+        }
+      })
     })
 
     yield* ctx.catalog.transform((catalog: any) => {
@@ -305,10 +316,73 @@ export const GoogleAntigravityPlugin = define({
         if (evt.package !== "@ai-sdk/google") return
         const mod = yield* Effect.promise(() => import("@ai-sdk/google"))
 
-        // Pre-resolve credentials statically inside the generator
-        const connection = yield* ctx.integration.connection.active("google-antigravity")
-        const credential = connection ? yield* ctx.integration.connection.resolve(connection).pipe(Effect.orDie) : undefined
-        const token = credential && credential.type === "oauth" ? credential.access : ""
+        const context = yield* Effect.context()
+        const runEffect = <A, E>(eff: Effect.Effect<A, E, any>) =>
+          Effect.runPromise(eff.pipe(Effect.provide(context)) as any)
+
+        const classifyQuotaGroup = (modelName: string, displayName?: string): string | null => {
+          const combined = `${modelName} ${displayName ?? ""}`.toLowerCase()
+          if (combined.includes("claude")) {
+            return "claude"
+          }
+          const isGemini3 = combined.includes("gemini-3") || combined.includes("gemini 3")
+          if (!isGemini3) {
+            return null
+          }
+          const isFlash = combined.includes("flash")
+          return isFlash ? "gemini-flash" : "gemini-pro"
+        }
+
+        const getQuotaGroupForModel = (modelName: string): string => {
+          const lower = modelName.toLowerCase()
+          if (lower.includes("claude")) return "claude"
+          if (lower.includes("flash")) return "gemini-flash"
+          return "gemini-pro"
+        }
+
+        const fetchQuotaForCredential = async (accessToken: string, projectId: string): Promise<any> => {
+          try {
+            const res = await fetch("https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels", {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${accessToken}`,
+                "Content-Type": "application/json",
+                "User-Agent": "antigravity/windows/amd64",
+              },
+              body: JSON.stringify({ project: projectId }),
+            })
+            if (!res.ok) return null
+            const payload = (await res.json()) as any
+            if (!payload || !payload.models) return null
+
+            const groups: Record<string, { remainingFraction: number; resetTime?: string }> = {}
+            for (const [modelName, entry] of Object.entries(payload.models)) {
+              const anyEntry = entry as any
+              const group = classifyQuotaGroup(modelName, anyEntry.displayName || anyEntry.modelName)
+              if (!group) continue
+
+              const quotaInfo = anyEntry.quotaInfo
+              if (!quotaInfo) continue
+
+              const rawFraction = quotaInfo.remainingFraction
+              const remainingFraction = typeof rawFraction === "number" && Number.isFinite(rawFraction)
+                ? Math.max(0, Math.min(1, rawFraction))
+                : 0
+
+              const existing = groups[group]
+              const nextRemaining = existing === undefined ? remainingFraction : Math.min(existing.remainingFraction, remainingFraction)
+
+              groups[group] = {
+                remainingFraction: nextRemaining,
+                resetTime: quotaInfo.resetTime,
+              }
+            }
+            return groups
+          } catch (err) {
+            console.error("Failed to fetch available models quota:", err)
+            return null
+          }
+        }
 
         const getThinkingLevel = (parsed: any): string | undefined => {
           if (typeof parsed.thinkingLevel === "string") return parsed.thinkingLevel
@@ -410,6 +484,200 @@ export const GoogleAntigravityPlugin = define({
 
           if (!antigravityModels.includes(lowerModel)) {
             return fetch(url, init)
+          }
+
+          // Pre-resolve active connection as fallback
+          const connection = await runEffect(integrations.connection.active(Integration.ID.make("google-antigravity")))
+          const credential = connection ? await runEffect(integrations.connection.resolve(connection as any)) as any : undefined
+          const fallbackToken = credential && credential.type === "oauth" ? credential.access : ""
+
+          // List all credentials for google-antigravity to apply selection logic
+          const creds = await runEffect(credentials.list(Integration.ID.make("google-antigravity"))) as any[]
+          const resolvedCreds: any[] = []
+          for (const c of creds) {
+            const val = await runEffect(integrations.connection.resolve({
+              id: c.id,
+              type: "credential",
+            } as any)) as any
+            if (val) {
+              resolvedCreds.push({
+                id: c.id,
+                label: c.label,
+                integrationID: c.integrationID,
+                value: {
+                  ...val,
+                  metadata: { ...(val.metadata || {}) }
+                }
+              })
+            }
+          }
+
+          const now = Date.now()
+          const quotaGroup = getQuotaGroupForModel(lowerModel)
+
+          // Filter out disabled/cooling down/rate-limited credentials, or 0% remaining weekly quota
+          const available = []
+          for (const cred of resolvedCreds) {
+            const meta = cred.value.metadata as any
+            if (meta.disabled === true) continue
+            if (meta.coolingDownUntil && now < meta.coolingDownUntil) continue
+            if (meta.rateLimitedUntil && now < meta.rateLimitedUntil) continue
+
+            // Check if cached quota exists and is expired or missing
+            let cachedQuota = meta.cachedQuota
+            let cachedQuotaUpdatedAt = meta.cachedQuotaUpdatedAt
+            
+            // Get the access token for the account
+            let token = ""
+            if ((cred.value as any).type === "key") {
+              // Manual Refresh Token: check if cached access token is still valid
+              if (meta.accessToken && meta.expiresAt && now + 5 * 60 * 1000 < meta.expiresAt) {
+                token = meta.accessToken
+              } else {
+                try {
+                  const res = await fetch("https://oauth2.googleapis.com/token", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                    body: new URLSearchParams({
+                      grant_type: "refresh_token",
+                      refresh_token: (cred.value as any).key,
+                      client_id: clientID,
+                      client_secret: clientSecret,
+                    }),
+                  })
+                  if (res.ok) {
+                    const tokenInfo = (await res.json()) as any
+                    token = tokenInfo.access_token
+                    const expiresAt = now + tokenInfo.expires_in * 1000
+
+                    // Fetch email dynamically if missing
+                    let email = meta.email
+                    if (!email) {
+                      const userRes = await fetch("https://www.googleapis.com/oauth2/v1/userinfo?alt=json", {
+                        headers: { Authorization: `Bearer ${token}` },
+                      })
+                      email = userRes.ok ? ((await userRes.json()) as any).email : undefined
+                    }
+
+                    // Fetch project ID dynamically if missing
+                    let projectId = meta.projectId
+                    if (!projectId) {
+                      const projectRes = await fetch("https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist", {
+                        method: "POST",
+                        headers: {
+                          "Content-Type": "application/json",
+                          Authorization: `Bearer ${token}`,
+                          "User-Agent": "google-api-nodejs-client/9.15.1",
+                          "X-Goog-Api-Client": "google-cloud-sdk vscode_cloudshelleditor/0.1",
+                        },
+                        body: JSON.stringify({
+                          metadata: {
+                            ideType: "ANTIGRAVITY",
+                            platform: process.platform === "win32" ? "WINDOWS" : "MACOS",
+                            pluginType: "GEMINI",
+                          },
+                        }),
+                      })
+                      if (projectRes.ok) {
+                        const payload = (await projectRes.json()) as any
+                        if (typeof payload?.cloudaicompanionProject === "string") {
+                          projectId = payload.cloudaicompanionProject
+                        } else if (typeof payload?.cloudaicompanionProject?.id === "string") {
+                          projectId = payload.cloudaicompanionProject.id
+                        }
+                      }
+                    }
+
+                    // Save the refreshed token & details in metadata
+                    Object.assign(meta, { accessToken: token, expiresAt, email, projectId })
+                    const updatedValue = { ...(cred.value as any), metadata: { ...meta } }
+                    await runEffect(credentials.update(cred.id, { value: updatedValue as any }))
+                    cred.value = updatedValue
+                  }
+                } catch (e) {
+                  console.error("Failed to refresh manual Google token:", e)
+                }
+              }
+            } else {
+              token = (cred.value as any).access
+            }
+
+            const credProjectId = meta.projectId || "rising-fact-p41fc"
+
+            if (token && (!cachedQuota || !cachedQuotaUpdatedAt || (now - cachedQuotaUpdatedAt) > 10 * 60 * 1000)) {
+              const freshQuota = await fetchQuotaForCredential(token, credProjectId)
+              if (freshQuota) {
+                cachedQuota = freshQuota
+                cachedQuotaUpdatedAt = now
+                // Persist the updated quota in the credential metadata
+                Object.assign(meta, { cachedQuota, cachedQuotaUpdatedAt })
+                const updatedValue = { ...(cred.value as any), metadata: { ...meta } }
+                await runEffect(credentials.update(cred.id, { value: updatedValue as any }))
+                cred.value = updatedValue
+              }
+            }
+
+            if (cachedQuota && cachedQuotaUpdatedAt && (now - cachedQuotaUpdatedAt) <= 10 * 60 * 1000) {
+              const groupData = cachedQuota[quotaGroup]
+              if (groupData && groupData.remainingFraction !== undefined && groupData.remainingFraction <= 0) {
+                // 0% remaining weekly quota fraction -> exclude
+                continue
+              }
+            }
+
+            available.push(cred)
+          }
+
+          // Select the best credential
+          const selectedCred = (() => {
+            if (available.length === 0) {
+              return resolvedCreds[0]
+            }
+
+            // Find max remainingFraction
+            let maxRem = -1
+            const scored = available.map((c) => {
+              const meta = c.value.metadata as any
+              let rem = 1.0
+              if (meta.cachedQuota && meta.cachedQuotaUpdatedAt && (now - meta.cachedQuotaUpdatedAt) <= 10 * 60 * 1000) {
+                const groupData = meta.cachedQuota[quotaGroup]
+                if (groupData && groupData.remainingFraction !== undefined) {
+                  rem = Math.max(0, Math.min(1, groupData.remainingFraction))
+                }
+              }
+              if (rem > maxRem) {
+                maxRem = rem
+              }
+              return { cred: c, rem }
+            })
+
+            // Select randomly among candidates with equal top remaining fraction
+            const topCandidates = scored.filter((item) => Math.abs(item.rem - maxRem) <= 0.001)
+            const randomIndex = Math.floor(Math.random() * topCandidates.length)
+            return topCandidates[randomIndex].cred
+          })()
+
+          // Resolve final token to use
+          let token = ""
+          if (selectedCred) {
+            const meta = selectedCred.value.metadata as any
+            if ((selectedCred.value as any).type === "key") {
+              token = meta.accessToken || ""
+            } else {
+              token = (selectedCred.value as any).access
+            }
+          } else {
+            token = fallbackToken
+          }
+
+          const selectedMeta = (selectedCred?.value.metadata || credential?.metadata || {}) as any
+          const projectId = selectedMeta.projectId || "rising-fact-p41fc"
+
+          // Update lastUsed timestamp of selected credential
+          if (selectedCred) {
+            Object.assign(selectedMeta, { lastUsed: now })
+            const updatedValue = { ...(selectedCred.value as any), metadata: { ...selectedMeta } }
+            await runEffect(credentials.update(selectedCred.id, { value: updatedValue as any }))
           }
 
           const initHeaders = new Headers(init?.headers)
@@ -514,9 +782,6 @@ export const GoogleAntigravityPlugin = define({
             })
           }
 
-          // TODO: project ID resolution from the authenticated account context is needed (7.3 scope)
-          const projectId = (credential?.metadata as any)?.projectId || "rising-fact-p41fc"
-
           const envelope = {
             project: projectId,
             model: resolvedBackendModel,
@@ -531,6 +796,13 @@ export const GoogleAntigravityPlugin = define({
             headers: initHeaders,
             body: JSON.stringify(envelope),
           })
+
+          if (response.status === 429 && selectedCred) {
+            const meta = (selectedCred.value.metadata || {}) as any
+            const updatedMeta = { ...meta, rateLimitedUntil: Date.now() + 5 * 60 * 1000 }
+            const updatedValue = { ...(selectedCred.value as any), metadata: updatedMeta }
+            await runEffect(credentials.update(selectedCred.id, { value: updatedValue as any }))
+          }
 
           if (!response.ok) return response
 
@@ -698,4 +970,4 @@ export const GoogleAntigravityPlugin = define({
       }),
     )
   }),
-} satisfies PluginInternal.Plugin<PluginInternal.Requirements | Scope.Scope>)
+} satisfies PluginInternal.Plugin<any>)
