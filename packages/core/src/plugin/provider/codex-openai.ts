@@ -284,55 +284,99 @@ export const CodexOpenAIPlugin = define({
             // Check if access token needs refresh
             let token = ""
             if ((cred.value as any).type === "key") {
-              // Stored as key: the key field is the refresh token
-              const refreshToken = (cred.value as any).key
+              const key = (cred.value as any).key
               if (meta.accessToken && meta.expiresAt && now + 5 * 60 * 1000 < meta.expiresAt) {
                 token = meta.accessToken
-              } else if (refreshToken) {
-                // Refresh the token
-                try {
-                  const res = await fetch(`${CODEX_ISSUER}/oauth/token`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-                    body: new URLSearchParams({
-                      grant_type: "refresh_token",
-                      refresh_token: refreshToken,
-                      client_id: CODEX_CLIENT_ID,
-                    }),
-                  })
-                  if (res.ok) {
-                    const tokenInfo = (await res.json()) as any
-                    token = tokenInfo.access_token
-                    const expiresAt = now + (tokenInfo.expires_in || 3600) * 1000
+              } else if (key) {
+                const keyParts = key.split(".")
 
-                    // Extract email and account ID from tokens
-                    const email = meta.email || extractEmailFromToken(token, tokenInfo.id_token)
-                    const accountId = meta.accountId || extractAccountIdFromToken(token, tokenInfo.id_token)
-                    const plan = meta.plan || extractPlanFromToken(token, tokenInfo.id_token)
-
-                    Object.assign(meta, {
-                      accessToken: token,
-                      expiresAt,
-                      email,
-                      accountId,
-                      plan,
-                      lastRefresh: now,
-                    })
+                if (keyParts.length === 3 && keyParts[0].startsWith("eyJ")) {
+                  // Case 1: Key is a JWT (access_token) - use directly until expiry
+                  const jwtPayload = parseJwtPayload(key)
+                  const jwtExp = typeof jwtPayload?.exp === "number" ? jwtPayload.exp * 1000 : 0
+                  if (jwtExp > now) {
+                    token = key
+                    const email = meta.email || extractEmailFromToken(key)
+                    const accountId = meta.accountId || extractAccountIdFromToken(key)
+                    const plan = meta.plan || extractPlanFromToken(key)
+                    Object.assign(meta, { accessToken: token, expiresAt: jwtExp, email, accountId, plan, lastRefresh: now })
                     const updatedValue = { ...(cred.value as any), metadata: { ...meta } }
                     await runEffect(credentials.update(cred.id, { value: updatedValue as any }))
                     cred.value = updatedValue
                   } else {
-                    const errorText = await res.text().catch(() => "")
-                    console.error(`Codex token refresh failed (${res.status}): ${errorText}`)
-                    // Mark as rate limited for 60 seconds
+                    // JWT expired, cannot refresh without a real refresh_token
+                    continue
+                  }
+                } else if (keyParts.length >= 4) {
+                  // Case 2: Key is a JWE (session_token) - try session-based refresh via chatgpt.com
+                  try {
+                    const sessionRes = await fetch("https://chatgpt.com/api/auth/session", {
+                      headers: {
+                        Cookie: `__Secure-next-auth.session-token=${key}`,
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                        Accept: "application/json",
+                      },
+                    })
+                    if (sessionRes.ok) {
+                      const sessionData = (await sessionRes.json()) as any
+                      token = sessionData.accessToken || ""
+                      if (token) {
+                        const expiresAt = now + 8 * 3600 * 1000
+                        const email = meta.email || sessionData.user?.email || extractEmailFromToken(token)
+                        const accountId = meta.accountId || extractAccountIdFromToken(token)
+                        const plan = meta.plan || extractPlanFromToken(token)
+                        Object.assign(meta, { accessToken: token, expiresAt, email, accountId, plan, lastRefresh: now })
+                        const updatedValue = { ...(cred.value as any), metadata: { ...meta } }
+                        await runEffect(credentials.update(cred.id, { value: updatedValue as any }))
+                        cred.value = updatedValue
+                      }
+                    }
+                  } catch (e) {
+                    console.error("Codex session-based refresh failed:", e)
+                  }
+
+                  if (!token) {
+                    // Session refresh failed - mark rate limited and skip
                     Object.assign(meta, { rateLimitedUntil: now + 60_000 })
                     const updatedValue = { ...(cred.value as any), metadata: { ...meta } }
                     await runEffect(credentials.update(cred.id, { value: updatedValue as any }))
                     continue
                   }
-                } catch (e) {
-                  console.error("Failed to refresh Codex token:", e)
-                  continue
+                } else {
+                  // Case 3: Key is an OAuth refresh_token - use standard OAuth refresh
+                  try {
+                    const res = await fetch(`${CODEX_ISSUER}/oauth/token`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                      body: new URLSearchParams({
+                        grant_type: "refresh_token",
+                        refresh_token: key,
+                        client_id: CODEX_CLIENT_ID,
+                      }),
+                    })
+                    if (res.ok) {
+                      const tokenInfo = (await res.json()) as any
+                      token = tokenInfo.access_token
+                      const expiresAt = now + (tokenInfo.expires_in || 3600) * 1000
+                      const email = meta.email || extractEmailFromToken(token, tokenInfo.id_token)
+                      const accountId = meta.accountId || extractAccountIdFromToken(token, tokenInfo.id_token)
+                      const plan = meta.plan || extractPlanFromToken(token, tokenInfo.id_token)
+                      Object.assign(meta, { accessToken: token, expiresAt, email, accountId, plan, lastRefresh: now })
+                      const updatedValue = { ...(cred.value as any), metadata: { ...meta } }
+                      await runEffect(credentials.update(cred.id, { value: updatedValue as any }))
+                      cred.value = updatedValue
+                    } else {
+                      const errorText = await res.text().catch(() => "")
+                      console.error(`Codex token refresh failed (${res.status}): ${errorText}`)
+                      Object.assign(meta, { rateLimitedUntil: now + 60_000 })
+                      const updatedValue = { ...(cred.value as any), metadata: { ...meta } }
+                      await runEffect(credentials.update(cred.id, { value: updatedValue as any }))
+                      continue
+                    }
+                  } catch (e) {
+                    console.error("Failed to refresh Codex token:", e)
+                    continue
+                  }
                 }
               }
             } else {

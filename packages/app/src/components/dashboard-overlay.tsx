@@ -59,6 +59,7 @@ function collectSessionLikeObjects(value: unknown, sourceName = "pasted"): any[]
 function convertToCockpitFormat(record: Record<string, any>): {
   access_token: string
   refresh_token: string
+  session_token: string
   id_token: string
   email?: string
   account_id?: string
@@ -81,6 +82,10 @@ function convertToCockpitFormat(record: Record<string, any>): {
     str(record.tokens?.id_token) || str(record.tokens?.idToken) ||
     str(record.credentials?.id_token)
 
+  const sessionToken =
+    str(record.session_token) || str(record.sessionToken) ||
+    str(record.tokens?.session_token) || str(record.tokens?.sessionToken)
+
   const email =
     str(record.user?.email) || str(record.email) ||
     str(record.meta?.label) || str(record.label) ||
@@ -99,11 +104,13 @@ function convertToCockpitFormat(record: Record<string, any>): {
   const plan =
     str(record.account?.planType) || str(record.plan_type) ||
     str(record.providerSpecificData?.chatgptPlanType) ||
-    str(auth.chatgpt_plan_type)
+    str(auth.chatgpt_plan_type) ||
+    str(record.chatgpt_plan_type)
 
   return {
     access_token: accessToken,
     refresh_token: refreshToken,
+    session_token: sessionToken,
     id_token: idToken,
     email: email || str(profile.email) || str(payload?.email as string),
     account_id: accountId || str(auth.chatgpt_account_id),
@@ -120,7 +127,6 @@ export function DashboardOverlay() {
   const [position, setPosition] = createSignal({ x: 150, y: 100 })
   const [refreshTokenInput, setRefreshTokenInput] = createSignal("")
   const [codexImportStatus, setCodexImportStatus] = createSignal("")
-  const [timeFilter, setTimeFilter] = createSignal<"1d" | "1w" | "1m" | "all">("all")
   const [isMigrating, setIsMigrating] = createSignal(false)
 
   let dragStart = { x: 0, y: 0 }
@@ -147,21 +153,26 @@ export function DashboardOverlay() {
     document.removeEventListener("pointerup", handlePointerUp)
   }
 
+  const extractConnections = (res: any): any[] => {
+    const info = res?.data?.data ?? res?.data ?? {}
+    return (info.connections ?? []).filter((c: any) => c.type === "credential")
+  }
+
   const fetchGoogleCreds = async () => {
     try {
-      const res = await (sdk().client as any).credential.list({ integrationID: "google-antigravity" })
-      if (res.data) setGoogleCreds(res.data)
+      const res = await sdk().client.v2.integration.get({ integrationID: "google-antigravity" })
+      setGoogleCreds(extractConnections(res))
     } catch (e) {
-      console.error(e)
+      console.error("Failed to fetch Google creds:", e)
     }
   }
 
   const fetchCodexCreds = async () => {
     try {
-      const res = await (sdk().client as any).credential.list({ integrationID: "codex-openai" })
-      if (res.data) setCodexCreds(res.data)
+      const res = await sdk().client.v2.integration.get({ integrationID: "codex-openai" })
+      setCodexCreds(extractConnections(res))
     } catch (e) {
-      console.error(e)
+      console.error("Failed to fetch Codex creds:", e)
     }
   }
 
@@ -181,7 +192,7 @@ export function DashboardOverlay() {
     const token = refreshTokenInput().trim()
     if (!token) return
     try {
-      await (sdk().client as any).integrations.connectKey({
+      await sdk().client.v2.integration.connect.key({
         integrationID: "google-antigravity",
         label: `Antigravity (${token.substring(0, 8)}...)`,
         key: token,
@@ -197,38 +208,29 @@ export function DashboardOverlay() {
   const migrateLegacyAccounts = async () => {
     setIsMigrating(true)
     try {
-      const oldCreds = await (sdk().client as any).credential.list({ integrationID: "@zeklop/opencode-antigravity-auth" })
-      if (oldCreds.data && oldCreds.data.length > 0) {
-        for (const cred of oldCreds.data) {
-          if (cred.value?.refreshToken) {
-            await (sdk().client as any).integrations.connectKey({
+      let migrated = 0
+
+      // Try env-based migration (legacy credentials can't be read via HTTP API - only id+label are exposed)
+      const envTokens = (import.meta as any).env?.VITE_MIGRATE_TOKENS
+      if (envTokens) {
+        const userTokens = JSON.parse(envTokens)
+        for (const user of userTokens) {
+          const exists = googleCreds().some((c: any) => c.label === user.email)
+          if (!exists) {
+            await sdk().client.v2.integration.connect.key({
               integrationID: "google-antigravity",
-              label: cred.label,
-              key: cred.value.refreshToken,
+              label: user.email,
+              key: user.token,
             })
+            migrated++
           }
         }
-        alert(`Migrated ${oldCreds.data.length} accounts!`)
+      }
+
+      if (migrated > 0) {
+        alert(`Migrated ${migrated} accounts!`)
       } else {
-        const envTokens = (import.meta as any).env?.VITE_MIGRATE_TOKENS
-        if (envTokens) {
-          const userTokens = JSON.parse(envTokens)
-          let count = 0
-          for (const user of userTokens) {
-            const exists = googleCreds().some((c: any) => c.value?.key === user.token || c.value?.metadata?.email === user.email)
-            if (!exists) {
-              await (sdk().client as any).integrations.connectKey({
-                integrationID: "google-antigravity",
-                label: user.email,
-                key: user.token,
-              })
-              count++
-            }
-          }
-          alert(`Imported ${count} accounts from .env.local!`)
-        } else {
-          alert("No legacy accounts found to migrate.")
-        }
+        alert("No legacy accounts found to migrate. Use 'Add via Refresh Token' to add accounts manually.")
       }
       fetchGoogleCreds()
     } catch (e) {
@@ -260,6 +262,14 @@ export function DashboardOverlay() {
             const parsed = JSON.parse(text)
             const sessions = collectSessionLikeObjects(parsed, file.name)
 
+            // Also try the parsed object directly (single-account format like {type:"codex", access_token, session_token, ...})
+            if (sessions.length === 0 && !Array.isArray(parsed)) {
+              const direct = convertToCockpitFormat(parsed)
+              if (direct) {
+                sessions.push({ value: parsed, sourceName: file.name, path: "$" })
+              }
+            }
+
             if (sessions.length === 0) {
               errors.push(`${file.name}: No accounts found`)
               continue
@@ -267,26 +277,32 @@ export function DashboardOverlay() {
 
             for (const session of sessions) {
               const cockpit = convertToCockpitFormat(session.value)
-              if (!cockpit || !cockpit.refresh_token) {
+              if (!cockpit) {
                 totalSkipped++
                 continue
               }
 
-              // Check for duplicate
+              // Determine the key to store: prefer refresh_token > session_token > access_token
+              const keyToken = cockpit.refresh_token || cockpit.session_token || cockpit.access_token
+              if (!keyToken) {
+                totalSkipped++
+                continue
+              }
+
+              // Check for duplicate by label (email)
               const exists = codexCreds().some((c: any) => {
-                const meta = c.value?.metadata || {}
-                return meta.email === cockpit.email || meta.accountId === cockpit.account_id
+                return c.label === cockpit.email || (cockpit.email && c.label?.includes(cockpit.email))
               })
               if (exists) {
                 totalSkipped++
                 continue
               }
 
-              // Import as codex-openai credential using the refresh token as the key
-              await (sdk().client as any).integrations.connectKey({
+              // Import as codex-openai credential
+              await sdk().client.v2.integration.connect.key({
                 integrationID: "codex-openai",
                 label: cockpit.email || `Codex (${cockpit.account_id?.substring(0, 8) || "account"}...)`,
-                key: cockpit.refresh_token,
+                key: keyToken,
               })
               totalImported++
             }
@@ -313,73 +329,20 @@ export function DashboardOverlay() {
   // ── Codex: Remove account ──
   const removeCodexAccount = async (id: string) => {
     try {
-      await (sdk().client as any).credential.remove({ id })
+      await sdk().client.v2.credential.remove({ credentialID: id })
       fetchCodexCreds()
     } catch (e) {
       console.error("Failed to remove Codex account", e)
     }
   }
 
-  // ── Usage stats (combines both Google and Codex) ──
-  const usageStats = () => {
-    let totalInput = 0
-    let totalOutput = 0
-    let totalCache = 0
-
-    const cutoff =
-      Date.now() -
-      (timeFilter() === "1d"
-        ? 86400000
-        : timeFilter() === "1w"
-          ? 604800000
-          : timeFilter() === "1m"
-            ? 2592000000
-            : 0)
-
-    const modelTotals: Record<string, { input: number; output: number; cache: number }> = {}
-    const allCreds = [...googleCreds(), ...codexCreds()]
-
-    for (const c of allCreds) {
-      const history = c.value?.metadata?.usageHistory || []
-      for (const h of history) {
-        if (timeFilter() !== "all" && h.timestamp < cutoff) continue
-        totalInput += h.inputTokens || 0
-        totalOutput += h.outputTokens || 0
-        totalCache += h.cacheReadTokens || 0
-
-        const model = h.model || "unknown"
-        if (!modelTotals[model]) modelTotals[model] = { input: 0, output: 0, cache: 0 }
-        modelTotals[model].input += h.inputTokens || 0
-        modelTotals[model].output += h.outputTokens || 0
-        modelTotals[model].cache += h.cacheReadTokens || 0
-      }
-    }
-
-    return {
-      totalInput,
-      totalOutput,
-      totalCache,
-      modelTotals: Object.entries(modelTotals).sort(
-        (a, b) => b[1].input + b[1].output + b[1].cache - (a[1].input + a[1].output + a[1].cache),
-      ),
-    }
-  }
-
-  const resetUsage = async () => {
+  // ── Google: Remove account ──
+  const removeGoogleAccount = async (id: string) => {
     try {
-      const allCreds = [...googleCreds(), ...codexCreds()]
-      for (const c of allCreds) {
-        const meta = c.value?.metadata || {}
-        if (meta.usageHistory || meta.usage) {
-          const updatedMeta = { ...meta }
-          delete updatedMeta.usageHistory
-          delete updatedMeta.usage
-          await (sdk().client as any).credential.update({ id: c.id, value: { ...c.value, metadata: updatedMeta } })
-        }
-      }
-      fetchAllCreds()
+      await sdk().client.v2.credential.remove({ credentialID: id })
+      fetchGoogleCreds()
     } catch (e) {
-      console.error("Failed to reset usage:", e)
+      console.error("Failed to remove Google account", e)
     }
   }
 
@@ -508,6 +471,14 @@ export function DashboardOverlay() {
                 </div>
               </div>
 
+              {/* Pool info */}
+              <div class="p-3 rounded-lg text-[11px] leading-relaxed" style={{ background: "rgba(59, 130, 246, 0.04)", border: "1px solid rgba(59, 130, 246, 0.1)", color: "#94a3b8" }}>
+                <span class="font-bold text-blue-300">Pool Switch Mechanism:</span> The provider selects accounts per model family (claude / gemini-pro / gemini-flash).
+                It uses <span class="text-blue-300">sticky selection</span> (preserves prompt cache) and falls back to
+                <span class="text-blue-300"> highest-remaining-quota</span> selection. On HTTP 429, the account gets a 5-min cooldown.
+                Accounts with 0% weekly quota are excluded automatically.
+              </div>
+
               {/* Account Cards */}
               <Show
                 when={googleCreds().length > 0}
@@ -517,67 +488,28 @@ export function DashboardOverlay() {
               >
                 <div class="flex flex-col gap-3">
                   <For each={googleCreds()}>
-                    {(cred) => {
-                      const meta = (cred.value?.metadata || {}) as any
-                      const quota = meta.cachedQuota || {}
-
-                      return (
-                        <div class="flex flex-col p-3 rounded-lg gap-2.5" style={{ background: "rgba(30, 27, 75, 0.4)", border: "1px solid rgba(99, 102, 241, 0.15)" }}>
-                          <div class="flex flex-row justify-between items-center">
-                            <div class="flex flex-col">
-                              <span class="text-xs font-bold text-white">{meta.email || cred.label}</span>
-                              <span class="text-[10px] text-slate-500">Project: {meta.projectId || "auto"}</span>
-                            </div>
-                            <div class="flex items-center gap-1.5">
-                              <Show when={meta.activeForFamily}>
-                                {(family) => (
-                                  <span
-                                    class="px-2 py-0.5 text-[10px] font-bold rounded-full capitalize"
-                                    style={{ background: "rgba(99, 102, 241, 0.15)", color: "#818cf8", border: "1px solid rgba(99, 102, 241, 0.2)" }}
-                                  >
-                                    Active {family() === "claude" ? "Claude" : "Gemini"}
-                                  </span>
-                                )}
-                              </Show>
-                              <Show when={meta.rateLimitedUntil && Date.now() < meta.rateLimitedUntil}>
-                                <span class="px-2 py-0.5 text-[10px] font-bold rounded-full" style={{ background: "rgba(239, 68, 68, 0.15)", color: "#f87171" }}>
-                                  Rate Limited
-                                </span>
-                              </Show>
-                              <Show when={!meta.rateLimitedUntil && !(meta.coolingDownUntil && Date.now() < meta.coolingDownUntil)}>
-                                <span class="px-2 py-0.5 text-[10px] font-bold rounded-full" style={{ background: "rgba(34, 197, 94, 0.15)", color: "#4ade80" }}>
-                                  Active
-                                </span>
-                              </Show>
-                            </div>
+                    {(cred) => (
+                      <div class="flex flex-col p-3 rounded-lg gap-2" style={{ background: "rgba(30, 27, 75, 0.4)", border: "1px solid rgba(99, 102, 241, 0.15)" }}>
+                        <div class="flex flex-row justify-between items-center">
+                          <div class="flex flex-col">
+                            <span class="text-xs font-bold text-white">{cred.label || "Unknown account"}</span>
+                            <span class="text-[10px] text-slate-500 font-mono">{cred.id.substring(0, 16)}...</span>
                           </div>
-
-                          {/* Quota bars */}
-                          <div class="flex flex-col gap-1.5">
-                            <For each={["claude", "gemini-pro", "gemini-flash"]}>
-                              {(group) => {
-                                const groupData = quota[group]
-                                const fraction = groupData?.remainingFraction !== undefined ? groupData.remainingFraction : 1.0
-                                const percent = Math.round(fraction * 100)
-                                const barColor = percent > 50 ? "#22c55e" : percent > 20 ? "#f59e0b" : "#ef4444"
-
-                                return (
-                                  <div class="flex flex-col gap-0.5">
-                                    <div class="flex flex-row justify-between text-[10px] text-slate-400">
-                                      <span class="capitalize">{group.replace("-", " ")}</span>
-                                      <span style={{ color: barColor }}>{percent}%</span>
-                                    </div>
-                                    <div class="w-full h-1 rounded-full overflow-hidden" style={{ background: "rgba(148, 163, 184, 0.1)" }}>
-                                      <div class="h-full rounded-full transition-all" style={{ width: percent + "%", background: barColor }} />
-                                    </div>
-                                  </div>
-                                )
-                              }}
-                            </For>
+                          <div class="flex items-center gap-1.5">
+                            <span class="px-2 py-0.5 text-[10px] font-bold rounded-full" style={{ background: "rgba(34, 197, 94, 0.15)", color: "#4ade80" }}>
+                              In Pool
+                            </span>
+                            <button
+                              class="ml-1 p-1 rounded hover:bg-red-500/20 transition-colors text-slate-600 hover:text-red-400"
+                              onClick={() => removeGoogleAccount(cred.id)}
+                              title="Remove account"
+                            >
+                              <Icon name="close" size="small" />
+                            </button>
                           </div>
                         </div>
-                      )
-                    }}
+                      </div>
+                    )}
                   </For>
                 </div>
               </Show>
@@ -616,7 +548,7 @@ export function DashboardOverlay() {
               <div class="p-3 rounded-lg text-[11px] leading-relaxed" style={{ background: "rgba(16, 185, 129, 0.06)", border: "1px solid rgba(16, 185, 129, 0.12)", color: "#94a3b8" }}>
                 <span class="font-bold text-emerald-300">Import from cockpit-tools:</span> Click "Add Accounts" and select one or more JSON files exported from
                 Cockpit Tools, 9router, Codex auth.json, AxonHub, CPA, sub2api, or Codex-Manager.
-                Accounts with a valid <span class="text-emerald-300 font-mono">refresh_token</span> will be imported into the API pool for GPT model access.
+                The <span class="text-emerald-300 font-mono">session_token</span> (or <span class="text-emerald-300 font-mono">refresh_token</span> if available) will be stored as the key for API pool rotation.
               </div>
 
               {/* Available GPT models */}
@@ -668,63 +600,28 @@ export function DashboardOverlay() {
               >
                 <div class="flex flex-col gap-2.5">
                   <For each={codexCreds()}>
-                    {(cred) => {
-                      const meta = (cred.value?.metadata || {}) as any
-
-                      return (
-                        <div class="flex flex-col p-3 rounded-lg gap-2" style={{ background: "rgba(16, 185, 129, 0.04)", border: "1px solid rgba(16, 185, 129, 0.12)" }}>
-                          <div class="flex flex-row justify-between items-center">
-                            <div class="flex flex-col">
-                              <span class="text-xs font-bold text-white">{meta.email || cred.label || "Codex Account"}</span>
-                              <div class="flex items-center gap-2 mt-0.5">
-                                <Show when={meta.plan}>
-                                  <span class="text-[9px] font-bold uppercase tracking-wider" style={{ color: meta.plan === "plus" || meta.plan === "pro" ? "#fbbf24" : "#94a3b8" }}>
-                                    {meta.plan}
-                                  </span>
-                                </Show>
-                                <Show when={meta.accountId}>
-                                  <span class="text-[9px] text-slate-600 font-mono">{(meta.accountId as string).substring(0, 12)}...</span>
-                                </Show>
-                              </div>
-                            </div>
-                            <div class="flex items-center gap-1.5">
-                              <Show when={meta.activeForCodex}>
-                                <span class="px-2 py-0.5 text-[10px] font-bold rounded-full" style={{ background: "rgba(16, 185, 129, 0.15)", color: "#6ee7b7" }}>
-                                  In Pool
-                                </span>
-                              </Show>
-                              <Show when={meta.rateLimitedUntil && Date.now() < meta.rateLimitedUntil}>
-                                <span class="px-2 py-0.5 text-[10px] font-bold rounded-full" style={{ background: "rgba(239, 68, 68, 0.15)", color: "#f87171" }}>
-                                  429
-                                </span>
-                              </Show>
-                              <Show when={!meta.rateLimitedUntil || Date.now() >= meta.rateLimitedUntil}>
-                                <span class="px-2 py-0.5 text-[10px] font-bold rounded-full" style={{ background: "rgba(34, 197, 94, 0.15)", color: "#4ade80" }}>
-                                  Ready
-                                </span>
-                              </Show>
-                              <button
-                                class="ml-1 p-1 rounded hover:bg-red-500/20 transition-colors text-slate-600 hover:text-red-400"
-                                onClick={() => removeCodexAccount(cred.id)}
-                                title="Remove account"
-                              >
-                                <Icon name="close" size="small" />
-                              </button>
-                            </div>
+                    {(cred) => (
+                      <div class="flex flex-col p-3 rounded-lg gap-2" style={{ background: "rgba(16, 185, 129, 0.04)", border: "1px solid rgba(16, 185, 129, 0.12)" }}>
+                        <div class="flex flex-row justify-between items-center">
+                          <div class="flex flex-col">
+                            <span class="text-xs font-bold text-white">{cred.label || "Codex Account"}</span>
+                            <span class="text-[9px] text-slate-600 font-mono">{cred.id.substring(0, 16)}...</span>
                           </div>
-
-                          {/* Last used / refresh info */}
-                          <div class="flex items-center gap-3 text-[9px] text-slate-600">
-                            <Show when={meta.lastUsed}>
-                              <span>Last used: {new Date(meta.lastUsed).toLocaleString()}</span>
-                            </Show>
-                            <Show when={meta.lastRefresh}>
-                              <span>Refreshed: {new Date(meta.lastRefresh).toLocaleString()}</span>
-                            </Show>
+                          <div class="flex items-center gap-1.5">
+                            <span class="px-2 py-0.5 text-[10px] font-bold rounded-full" style={{ background: "rgba(34, 197, 94, 0.15)", color: "#4ade80" }}>
+                              In Pool
+                            </span>
+                            <button
+                              class="ml-1 p-1 rounded hover:bg-red-500/20 transition-colors text-slate-600 hover:text-red-400"
+                              onClick={() => removeCodexAccount(cred.id)}
+                              title="Remove account"
+                            >
+                              <Icon name="close" size="small" />
+                            </button>
                           </div>
                         </div>
-                      )
-                    }}
+                      </div>
+                    )}
                   </For>
                 </div>
               </Show>
@@ -738,97 +635,25 @@ export function DashboardOverlay() {
                 <div class="flex items-center gap-3">
                   <div class="w-3 h-3 rounded-full" style={{ background: "#f59e0b" }} />
                   <h3 class="text-sm font-bold text-white">Token Usage</h3>
-                  <select
-                    class="text-[11px] font-semibold rounded-lg px-2.5 py-1.5 outline-none cursor-pointer"
-                    style={{ background: "rgba(245, 158, 11, 0.1)", color: "#fbbf24", border: "1px solid rgba(245, 158, 11, 0.2)" }}
-                    value={timeFilter()}
-                    onChange={(e) => setTimeFilter(e.currentTarget.value as any)}
-                  >
-                    <option value="1d">1 Day</option>
-                    <option value="1w">1 Week</option>
-                    <option value="1m">1 Month</option>
-                    <option value="all">All Time</option>
-                  </select>
                 </div>
-                <button
-                  class="px-3 py-1.5 text-[11px] font-semibold rounded-lg transition-colors"
-                  style={{ background: "rgba(239, 68, 68, 0.1)", color: "#f87171", border: "1px solid rgba(239, 68, 68, 0.15)" }}
-                  onClick={resetUsage}
-                >
-                  Reset
-                </button>
               </div>
 
               {/* Summary Cards */}
-              <div class="grid grid-cols-3 gap-3">
-                <div class="flex flex-col p-3 rounded-lg" style={{ background: "rgba(99, 102, 241, 0.08)", border: "1px solid rgba(99, 102, 241, 0.15)" }}>
-                  <span class="text-[9px] font-bold text-indigo-400 uppercase tracking-wider">Total Processed</span>
-                  <span class="text-xl font-black text-white mt-1">
-                    {(usageStats().totalInput + usageStats().totalOutput + usageStats().totalCache).toLocaleString()}
-                  </span>
+              <div class="grid grid-cols-2 gap-3">
+                <div class="flex flex-col p-3 rounded-lg" style={{ background: "rgba(59, 130, 246, 0.08)", border: "1px solid rgba(59, 130, 246, 0.15)" }}>
+                  <span class="text-[9px] font-bold text-blue-400 uppercase tracking-wider">Google Accounts</span>
+                  <span class="text-xl font-black text-white mt-1">{googleCreds().length}</span>
                 </div>
-                <div class="flex flex-col p-3 rounded-lg" style={{ background: "rgba(245, 158, 11, 0.08)", border: "1px solid rgba(245, 158, 11, 0.15)" }}>
-                  <span class="text-[9px] font-bold text-amber-400 uppercase tracking-wider">Cache Reads</span>
-                  <span class="text-xl font-black mt-1" style={{ color: "#fbbf24" }}>
-                    {usageStats().totalCache.toLocaleString()}
-                  </span>
-                </div>
-                <div class="flex flex-col p-3 rounded-lg" style={{ background: "rgba(34, 197, 94, 0.08)", border: "1px solid rgba(34, 197, 94, 0.15)" }}>
-                  <span class="text-[9px] font-bold text-emerald-400 uppercase tracking-wider">I/O Tokens</span>
-                  <span class="text-xl font-black mt-1" style={{ color: "#4ade80" }}>
-                    {(usageStats().totalInput + usageStats().totalOutput).toLocaleString()}
-                  </span>
+                <div class="flex flex-col p-3 rounded-lg" style={{ background: "rgba(16, 185, 129, 0.08)", border: "1px solid rgba(16, 185, 129, 0.15)" }}>
+                  <span class="text-[9px] font-bold text-emerald-400 uppercase tracking-wider">Codex Accounts</span>
+                  <span class="text-xl font-black mt-1" style={{ color: "#4ade80" }}>{codexCreds().length}</span>
                 </div>
               </div>
 
-              {/* Per-model breakdown */}
-              <div class="flex flex-col gap-2">
-                <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Per-Model Breakdown</span>
-                <Show
-                  when={usageStats().modelTotals.length > 0}
-                  fallback={<div class="text-xs text-slate-600 py-4 text-center">No usage recorded.</div>}
-                >
-                  <div class="flex flex-col gap-2 overflow-y-auto pr-1 pb-4" style={{ "max-height": "300px" }}>
-                    <For each={usageStats().modelTotals}>
-                      {([modelName, usage]) => {
-                        const total = usage.input + usage.output + usage.cache
-                        const maxTotal = usageStats().modelTotals[0]
-                          ? usageStats().modelTotals[0][1].input + usageStats().modelTotals[0][1].output + usageStats().modelTotals[0][1].cache
-                          : 1
-                        const barPercent = Math.max(5, Math.round((total / maxTotal) * 100))
-
-                        return (
-                          <div class="flex flex-col gap-1.5 p-2.5 rounded-lg" style={{ background: "rgba(148, 163, 184, 0.04)", border: "1px solid rgba(148, 163, 184, 0.08)" }}>
-                            <div class="flex flex-row justify-between items-center">
-                              <span class="text-xs font-semibold text-white truncate mr-3">{modelName}</span>
-                              <span class="text-xs font-bold text-slate-300 shrink-0">{total.toLocaleString()}</span>
-                            </div>
-                            <div class="w-full h-1 rounded-full overflow-hidden" style={{ background: "rgba(148, 163, 184, 0.08)" }}>
-                              <div
-                                class="h-full rounded-full"
-                                style={{
-                                  width: barPercent + "%",
-                                  background: "linear-gradient(90deg, #6366f1, #8b5cf6)",
-                                }}
-                              />
-                            </div>
-                            <div class="flex gap-3 text-[9px] text-slate-500">
-                              <span>
-                                In: <span class="text-blue-400">{usage.input.toLocaleString()}</span>
-                              </span>
-                              <span>
-                                Out: <span class="text-purple-400">{usage.output.toLocaleString()}</span>
-                              </span>
-                              <span>
-                                Cache: <span class="text-amber-400">{usage.cache.toLocaleString()}</span>
-                              </span>
-                            </div>
-                          </div>
-                        )
-                      }}
-                    </For>
-                  </div>
-                </Show>
+              {/* Info */}
+              <div class="p-3 rounded-lg text-[11px] leading-relaxed" style={{ background: "rgba(245, 158, 11, 0.06)", border: "1px solid rgba(245, 158, 11, 0.12)", color: "#94a3b8" }}>
+                <span class="font-bold text-amber-300">Note:</span> Detailed per-model token usage and quota breakdowns are tracked server-side
+                in credential metadata. The dashboard shows account pool counts. Use the Google and Codex tabs to manage accounts.
               </div>
             </div>
           </Show>
