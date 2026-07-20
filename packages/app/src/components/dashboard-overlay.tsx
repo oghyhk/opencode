@@ -147,21 +147,35 @@ export function DashboardOverlay() {
     document.removeEventListener("pointerup", handlePointerUp)
   }
 
+  const extractConnections = (res: any): any[] => {
+    const info = res?.data?.data ?? res?.data ?? res ?? {}
+    return (info.connections ?? []).filter((c: any) => c.type === "credential")
+  }
+
   const fetchGoogleCreds = async () => {
     try {
-      const res = await (sdk().client as any).credentials.list({ integrationID: "google-antigravity" })
-      if (res.data) setGoogleCreds(res.data)
+      const res = await (sdk().client as any).v2.integration.get({ integrationID: "google-antigravity" })
+      const conns = extractConnections(res)
+      // Also try to enrich with metadata from credential.list
+      try {
+        const credRes = await (sdk().client as any).credentials.list({ integrationID: "google-antigravity" })
+        if (credRes.data && credRes.data.length > 0) {
+          setGoogleCreds(credRes.data)
+          return
+        }
+      } catch (_) {}
+      setGoogleCreds(conns)
     } catch (e) {
-      console.error(e)
+      console.error("Failed to fetch Google accounts:", e)
     }
   }
 
   const fetchCodexCreds = async () => {
     try {
-      const res = await (sdk().client as any).credentials.list({ integrationID: "codex-openai" })
-      if (res.data) setCodexCreds(res.data)
+      const res = await (sdk().client as any).v2.integration.get({ integrationID: "codex-openai" })
+      setCodexCreds(extractConnections(res))
     } catch (e) {
-      console.error(e)
+      console.error("Failed to fetch Codex accounts:", e)
     }
   }
 
@@ -309,6 +323,16 @@ export function DashboardOverlay() {
       fetchCodexCreds()
     } catch (e) {
       console.error("Failed to remove Codex account", e)
+    }
+  }
+
+  // ── Google: Remove account ──
+  const removeGoogleAccount = async (id: string) => {
+    try {
+      await (sdk().client as any).v2.credential.remove({ credentialID: id })
+      fetchGoogleCreds()
+    } catch (e) {
+      console.error("Failed to remove Google account", e)
     }
   }
 
@@ -520,77 +544,88 @@ export function DashboardOverlay() {
                     {(cred) => {
                       const meta = (cred.value?.metadata || {}) as any
                       const quota = meta.cachedQuota || {}
+                      const hasMetadata = !!cred.value
+                      const accountLabel = meta.email || cred.label || "Unknown account"
+                      const accountId = cred.id
 
                       return (
-                        <div class="flex flex-col p-3 rounded-lg gap-2.5" style={{ background: "rgba(30, 27, 75, 0.4)", border: "1px solid rgba(99, 102, 241, 0.15)" }}>
+                        <div
+                          class="flex flex-col p-3 rounded-lg gap-2.5"
+                          style={{
+                            background: meta.activeForFamily ? "rgba(49, 46, 129, 0.6)" : "rgba(30, 27, 75, 0.4)",
+                            border: meta.activeForFamily ? "1px solid rgba(129, 140, 248, 0.5)" : "1px solid rgba(99, 102, 241, 0.15)",
+                          }}
+                        >
                           <div class="flex flex-row justify-between items-center">
                             <div class="flex flex-col">
-                              <span class="text-xs font-bold text-white">{meta.email || cred.label}</span>
-                              <span class="text-[10px] text-slate-500">Project: {meta.projectId || "auto"}</span>
+                              <span class="text-xs font-bold text-white">{accountLabel}</span>
+                              <span class="text-[10px] text-slate-500 font-mono">{accountId.substring(0, 16)}...</span>
+                              <Show when={meta.projectId}>
+                                <span class="text-[10px] text-slate-500">Project: {meta.projectId}</span>
+                              </Show>
                             </div>
                             <div class="flex items-center gap-1.5">
                               <Show when={meta.activeForFamily}>
                                 {(family) => (
-                                  <span
-                                    class="px-2 py-0.5 text-[10px] font-bold rounded-full capitalize"
-                                    style={{ background: "rgba(99, 102, 241, 0.15)", color: "#818cf8", border: "1px solid rgba(99, 102, 241, 0.2)" }}
-                                  >
+                                  <span class="px-2 py-0.5 text-[10px] font-bold rounded-full capitalize bg-indigo-500/20 text-indigo-300 border border-indigo-500/20">
                                     Active {family() === "claude" ? "Claude" : "Gemini"}
                                   </span>
                                 )}
                               </Show>
-                              <Show when={!meta.activeForFamily || meta.activeForFamily !== "claude"}>
-                                <button
-                                  class="px-2 py-0.5 text-[9px] font-bold rounded-md bg-slate-800 hover:bg-indigo-600 text-slate-300 hover:text-white transition-colors border border-slate-700 hover:border-indigo-500"
-                                  onClick={() => setActiveGoogleAccount(cred.id, "claude")}
-                                >
-                                  Make Active (Claude)
-                                </button>
-                              </Show>
-                              <Show when={!meta.activeForFamily || meta.activeForFamily !== "gemini"}>
-                                <button
-                                  class="px-2 py-0.5 text-[9px] font-bold rounded-md bg-slate-800 hover:bg-sky-600 text-slate-300 hover:text-white transition-colors border border-slate-700 hover:border-sky-500"
-                                  onClick={() => setActiveGoogleAccount(cred.id, "gemini")}
-                                >
-                                  Make Active (Gemini)
-                                </button>
-                              </Show>
                               <Show when={meta.rateLimitedUntil && Date.now() < meta.rateLimitedUntil}>
-                                <span class="px-2 py-0.5 text-[10px] font-bold rounded-full" style={{ background: "rgba(239, 68, 68, 0.15)", color: "#f87171" }}>
-                                  Rate Limited
-                                </span>
+                                <span class="px-2 py-0.5 text-[10px] font-bold rounded-full bg-red-500/20 text-red-400">Rate Limited</span>
                               </Show>
-                              <Show when={!meta.rateLimitedUntil && !(meta.coolingDownUntil && Date.now() < meta.coolingDownUntil)}>
-                                <span class="px-2 py-0.5 text-[10px] font-bold rounded-full" style={{ background: "rgba(34, 197, 94, 0.15)", color: "#4ade80" }}>
-                                  Active
-                                </span>
+                              <Show when={hasMetadata && !meta.rateLimitedUntil && !(meta.coolingDownUntil && Date.now() < meta.coolingDownUntil)}>
+                                <span class="px-2 py-0.5 text-[10px] font-bold rounded-full bg-emerald-500/20 text-emerald-400">Active</span>
                               </Show>
+                              <Show when={!hasMetadata}>
+                                <span class="px-2 py-0.5 text-[10px] font-bold rounded-full bg-slate-500/20 text-slate-400">Connected</span>
+                              </Show>
+                              <button
+                                class="px-2 py-0.5 text-[9px] font-bold rounded-md bg-slate-800 hover:bg-indigo-600 text-slate-300 hover:text-white transition-colors border border-slate-700 hover:border-indigo-500"
+                                onClick={() => setActiveGoogleAccount(accountId, "claude")}
+                              >
+                                Active (Claude)
+                              </button>
+                              <button
+                                class="px-2 py-0.5 text-[9px] font-bold rounded-md bg-slate-800 hover:bg-sky-600 text-slate-300 hover:text-white transition-colors border border-slate-700 hover:border-sky-500"
+                                onClick={() => setActiveGoogleAccount(accountId, "gemini")}
+                              >
+                                Active (Gemini)
+                              </button>
+                              <button
+                                class="ml-1 p-1 rounded hover:bg-red-500/20 transition-colors text-slate-600 hover:text-red-400"
+                                onClick={() => removeGoogleAccount(accountId)}
+                                title="Remove account"
+                              >
+                                <Icon name="close" size="small" />
+                              </button>
                             </div>
                           </div>
 
-                          {/* Quota bars */}
-                          <div class="flex flex-col gap-1.5">
-                            <For each={["claude", "gemini-pro", "gemini-flash"]}>
-                              {(group) => {
-                                const groupData = quota[group]
-                                const fraction = groupData?.remainingFraction !== undefined ? groupData.remainingFraction : 1.0
-                                const percent = Math.round(fraction * 100)
-                                const barColor = percent > 50 ? "#22c55e" : percent > 20 ? "#f59e0b" : "#ef4444"
-
-                                return (
-                                  <div class="flex flex-col gap-0.5">
-                                    <div class="flex flex-row justify-between text-[10px] text-slate-400">
-                                      <span class="capitalize">{group.replace("-", " ")}</span>
-                                      <span style={{ color: barColor }}>{percent}%</span>
+                          <Show when={hasMetadata}>
+                            <div class="flex flex-col gap-1.5">
+                              <For each={["claude", "gemini-pro", "gemini-flash"]}>
+                                {(group) => {
+                                  const groupData = quota[group]
+                                  const fraction = groupData?.remainingFraction !== undefined ? groupData.remainingFraction : 1.0
+                                  const percent = Math.round(fraction * 100)
+                                  const barColor = percent > 50 ? "#22c55e" : percent > 20 ? "#f59e0b" : "#ef4444"
+                                  return (
+                                    <div class="flex flex-col gap-0.5">
+                                      <div class="flex flex-row justify-between text-[10px] text-slate-400">
+                                        <span class="capitalize">{group.replace("-", " ")}</span>
+                                        <span style={{ color: barColor }}>{percent}%</span>
+                                      </div>
+                                      <div class="w-full h-1 rounded-full overflow-hidden" style={{ background: "rgba(148, 163, 184, 0.1)" }}>
+                                        <div class="h-full rounded-full transition-all" style={{ width: percent + "%", background: barColor }} />
+                                      </div>
                                     </div>
-                                    <div class="w-full h-1 rounded-full overflow-hidden" style={{ background: "rgba(148, 163, 184, 0.1)" }}>
-                                      <div class="h-full rounded-full transition-all" style={{ width: percent + "%", background: barColor }} />
-                                    </div>
-                                  </div>
-                                )
-                              }}
-                            </For>
-                          </div>
+                                  )
+                                }}
+                              </For>
+                            </div>
+                          </Show>
                         </div>
                       )
                     }}
