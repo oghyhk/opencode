@@ -38,7 +38,7 @@ import { setV2Toast, showToast, ToastRegion } from "@/utils/toast"
 import { useServerSDK } from "@/context/server-sdk"
 import { clearWorkspaceTerminals } from "@/context/terminal"
 import { pickSessionCacheEvictions } from "@/context/global-sync/session-cache"
-import { dashboardOpen } from "@/context/dashboard"
+import { dashboardOpen, setDashboardOpen } from "@/context/dashboard"
 import { DashboardOverlay } from "@/components/dashboard-overlay"
 import { useNotification } from "@/context/notification"
 import { usePermission } from "@/context/permission"
@@ -2239,6 +2239,8 @@ export default function LegacyLayout(props: ParentProps) {
       settingsLabel={() => language.t("sidebar.settings")}
       settingsKeybind={() => command.keybind("settings.open")}
       onOpenSettings={openSettings}
+      dashboardLabel={() => "Dashboard"}
+      onOpenDashboard={() => setDashboardOpen(!dashboardOpen())}
       helpLabel={() => language.t("sidebar.help")}
       onOpenHelp={() => platform.openLink("https://opencode.ai/desktop-feedback")}
       renderPanel={() =>

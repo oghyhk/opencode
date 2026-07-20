@@ -8,6 +8,7 @@ export function DashboardOverlay() {
   const [activeTab, setActiveTab] = createSignal<"accounts" | "usage">("accounts")
   const [creds, setCreds] = createSignal<any[]>([])
   const [position, setPosition] = createSignal({ x: 150, y: 100 })
+  const [refreshTokenInput, setRefreshTokenInput] = createSignal("")
   
   let dragStart = { x: 0, y: 0 }
   let isDragging = false
@@ -91,6 +92,28 @@ export function DashboardOverlay() {
     }
   }
 
+  const addAccountFromToken = async () => {
+    const token = refreshTokenInput().trim()
+    if (!token) return
+    try {
+      await (sdk().client as any).credential.create({
+        integrationID: "google-antigravity",
+        label: `Antigravity (${token.substring(0, 5)}...)`,
+        value: {
+          refreshToken: token,
+          metadata: {
+            email: "Imported via Token",
+            projectId: "rising-fact-p41fc"
+          }
+        }
+      })
+      setRefreshTokenInput("")
+      fetchCreds()
+    } catch (e) {
+      console.error("Failed to add account via refresh token", e)
+    }
+  }
+
   return (
     <div 
       class="absolute z-50 flex flex-col w-[800px] h-[550px] bg-v2-background-bg-base border border-v2-border-default rounded-lg shadow-2xl overflow-hidden pointer-events-auto"
@@ -152,8 +175,30 @@ export function DashboardOverlay() {
           <Show when={activeTab() === "accounts"}>
             <div class="flex flex-col gap-4">
               <h3 class="text-15-bold font-bold text-v2-text-primary border-b border-v2-border-default pb-2">Antigravity Accounts</h3>
+              
+              {/* Add Account Section */}
+              <div class="flex flex-col gap-2 p-3 rounded border border-v2-border-default bg-v2-background-bg-subtle">
+                <span class="text-13-medium text-v2-text-primary">Add Account via Refresh Token</span>
+                <div class="flex flex-row gap-2">
+                  <input
+                    type="text"
+                    placeholder="1//0xxxxxxxxx..."
+                    value={refreshTokenInput()}
+                    onInput={(e) => setRefreshTokenInput(e.currentTarget.value)}
+                    class="flex-1 px-3 py-1.5 bg-v2-background-bg-base border border-v2-border-default rounded text-13-regular text-v2-text-primary focus:outline-none focus:border-blue-500"
+                  />
+                  <button
+                    class="px-4 py-1.5 bg-blue-500 hover:bg-blue-600 text-white text-13-medium rounded transition-colors disabled:opacity-50"
+                    disabled={!refreshTokenInput().trim()}
+                    onClick={addAccountFromToken}
+                  >
+                    Add
+                  </button>
+                </div>
+              </div>
+
               <Show when={creds().length > 0} fallback={
-                <div class="text-12-regular text-v2-text-tertiary">No Antigravity accounts configured yet.</div>
+                <div class="text-12-regular text-v2-text-tertiary mt-2">No Antigravity accounts configured yet.</div>
               }>
                 <div class="flex flex-col gap-3">
                   <For each={creds()}>
