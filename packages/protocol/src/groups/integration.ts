@@ -125,6 +125,22 @@ export const IntegrationGroup = HttpApiGroup.make("server.integration")
         }),
       ),
   )
+  .add(
+    HttpApiEndpoint.post("integration.migratePlugin", "/api/integration/:integrationID/migrate-plugin", {
+      params: { integrationID: Integration.ID },
+      query: LocationQuery,
+      success: Location.response(Schema.Struct({ migrated: Schema.Number, skipped: Schema.Number })),
+      error: InvalidRequestError,
+    })
+      .annotateMerge(locationQueryOpenApi)
+      .annotateMerge(
+        OpenApi.annotations({
+          identifier: "v2.integration.migratePlugin",
+          summary: "Migrate plugin accounts",
+          description: "Migrate legacy accounts from plugin config into native credentials.",
+        }),
+      ),
+  )
   .annotateMerge(
     OpenApi.annotations({ title: "integrations", description: "Integration discovery and authentication routes." }),
   )

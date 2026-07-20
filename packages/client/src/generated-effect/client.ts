@@ -407,6 +407,17 @@ const Endpoint8_6 = (raw: RawClient["server.integration"]) => (input: Endpoint8_
     query: { location: input["location"] },
   }).pipe(Effect.mapError(mapClientError))
 
+type Endpoint8_7Request = Parameters<RawClient["server.integration"]["integration.migratePlugin"]>[0]
+type Endpoint8_7Input = {
+  readonly integrationID: Endpoint8_7Request["params"]["integrationID"]
+  readonly location?: Endpoint8_7Request["query"]["location"]
+}
+const Endpoint8_7 = (raw: RawClient["server.integration"]) => (input: Endpoint8_7Input) =>
+  raw["integration.migratePlugin"]({
+    params: { integrationID: input["integrationID"] },
+    query: { location: input["location"] },
+  }).pipe(Effect.mapError(mapClientError))
+
 const adaptGroup8 = (raw: RawClient["server.integration"]) => ({
   list: Endpoint8_0(raw),
   get: Endpoint8_1(raw),
@@ -415,6 +426,7 @@ const adaptGroup8 = (raw: RawClient["server.integration"]) => ({
   attemptStatus: Endpoint8_4(raw),
   attemptComplete: Endpoint8_5(raw),
   attemptCancel: Endpoint8_6(raw),
+  migratePlugin: Endpoint8_7(raw),
 })
 
 type Endpoint9_0Request = Parameters<RawClient["server.credential"]["credential.update"]>[0]

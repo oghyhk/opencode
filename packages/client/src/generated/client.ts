@@ -70,6 +70,8 @@ import type {
   IntegrationsAttemptCompleteOutput,
   IntegrationsAttemptCancelInput,
   IntegrationsAttemptCancelOutput,
+  IntegrationsMigratePluginInput,
+  IntegrationsMigratePluginOutput,
   CredentialsUpdateInput,
   CredentialsUpdateOutput,
   CredentialsRemoveInput,
@@ -706,6 +708,18 @@ export function make(options: ClientOptions) {
             successStatus: 204,
             declaredStatuses: [401, 400],
             empty: true,
+          },
+          requestOptions,
+        ),
+      migratePlugin: (input: IntegrationsMigratePluginInput, requestOptions?: RequestOptions) =>
+        request<IntegrationsMigratePluginOutput>(
+          {
+            method: "POST",
+            path: `/api/integration/${encodeURIComponent(input.integrationID)}/migrate-plugin`,
+            query: { location: input["location"] },
+            successStatus: 200,
+            declaredStatuses: [400, 401],
+            empty: false,
           },
           requestOptions,
         ),

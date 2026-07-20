@@ -197,43 +197,21 @@ export function DashboardOverlay() {
   const migrateLegacyAccounts = async () => {
     setIsMigrating(true)
     try {
-      const oldCreds = await (sdk().client as any).credential.list({ integrationID: "@zeklop/opencode-antigravity-auth" })
-      if (oldCreds.data && oldCreds.data.length > 0) {
-        for (const cred of oldCreds.data) {
-          if (cred.value?.refreshToken) {
-            await (sdk().client as any).integrations.connectKey({
-              integrationID: "google-antigravity",
-              label: cred.label,
-              key: cred.value.refreshToken,
-            })
-          }
-        }
-        alert(`Migrated ${oldCreds.data.length} accounts!`)
+      const client = sdk().client as any
+      const res = client.v2?.integration?.migratePlugin
+        ? await client.v2.integration.migratePlugin({ integrationID: "google-antigravity" })
+        : await client.integrations.migratePlugin({ integrationID: "google-antigravity" })
+
+      const data = res?.data ?? res
+      if (data && typeof data.migrated === "number") {
+        alert(`Successfully migrated ${data.migrated} account(s) from plugin config (${data.skipped} skipped/existing)!`)
       } else {
-        const envTokens = (import.meta as any).env?.VITE_MIGRATE_TOKENS
-        if (envTokens) {
-          const userTokens = JSON.parse(envTokens)
-          let count = 0
-          for (const user of userTokens) {
-            const exists = googleCreds().some((c: any) => c.value?.key === user.token || c.value?.metadata?.email === user.email)
-            if (!exists) {
-              await (sdk().client as any).integrations.connectKey({
-                integrationID: "google-antigravity",
-                label: user.email,
-                key: user.token,
-              })
-              count++
-            }
-          }
-          alert(`Imported ${count} accounts from .env.local!`)
-        } else {
-          alert("No legacy accounts found to migrate.")
-        }
+        alert("Migration completed.")
       }
       fetchGoogleCreds()
     } catch (e) {
-      console.error("Failed to migrate", e)
-      alert("Migration failed. Check console.")
+      console.error("Failed to migrate plugin accounts:", e)
+      alert("Migration failed or endpoint unavailable.")
     } finally {
       setIsMigrating(false)
     }

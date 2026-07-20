@@ -148,6 +148,7 @@ export type AgentsListOutput = {
     readonly hidden: boolean
     readonly color?: string | "primary" | "secondary" | "accent" | "success" | "warning" | "error" | "info"
     readonly steps?: number
+    readonly max_continuations?: number
     readonly permissions: ReadonlyArray<{
       readonly action: string
       readonly resource: string
@@ -2393,6 +2394,25 @@ export type IntegrationsAttemptCancelInput = {
 }
 
 export type IntegrationsAttemptCancelOutput = void
+
+export type IntegrationsMigratePluginInput = {
+  readonly integrationID: { readonly integrationID: string }["integrationID"]
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+  }["location"]
+}
+
+export type IntegrationsMigratePluginOutput = {
+  readonly location: {
+    readonly directory: string
+    readonly workspaceID?: string
+    readonly project: { readonly id: string; readonly directory: string }
+  }
+  readonly data: {
+    readonly migrated: number | "Infinity" | "-Infinity" | "NaN"
+    readonly skipped: number | "Infinity" | "-Infinity" | "NaN"
+  }
+}
 
 export type CredentialsUpdateInput = {
   readonly credentialID: { readonly credentialID: string }["credentialID"]
