@@ -149,7 +149,31 @@ export function DashboardOverlay() {
         }
         alert(`Successfully migrated ${oldCreds.data.length} accounts to the native Antigravity integration!`)
       } else {
-        alert("No legacy plugin accounts found to migrate. Please use the Add Account via Refresh Token input above.")
+        // Fallback to importing tokens from packages/app/.env.local if present
+        const envTokens = import.meta.env.VITE_MIGRATE_TOKENS
+        if (envTokens) {
+          try {
+            const userTokens = JSON.parse(envTokens)
+            let count = 0
+            for (const user of userTokens) {
+              const exists = creds().some((c: any) => c.value?.key === user.token || (c.value?.metadata?.email === user.email))
+              if (!exists) {
+                await (sdk().client as any).integrations.connectKey({
+                  integrationID: "google-antigravity",
+                  label: user.email,
+                  key: user.token
+                })
+                count++
+              }
+            }
+            alert(`Successfully imported ${count} accounts from .env.local file!`)
+          } catch (err) {
+            console.error("Failed to parse VITE_MIGRATE_TOKENS", err)
+            alert("VITE_MIGRATE_TOKENS in .env.local is malformed.")
+          }
+        } else {
+          alert("No legacy plugin accounts found to migrate, and no VITE_MIGRATE_TOKENS found in packages/app/.env.local")
+        }
       }
       fetchCreds()
     } catch (e) {
